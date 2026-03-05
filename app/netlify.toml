@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Como este app é SPA (navegação interna), garantimos fallback do Netlify
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
