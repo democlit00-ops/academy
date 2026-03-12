@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Calculator, TrendingUp, Info, Share2, Trophy } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Calculator, TrendingUp, Info, Share2, Trophy, User } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,11 +8,15 @@ import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import type { WorkoutSession } from '@/types';
+import type { WorkoutSession, WeekDay } from '@/types';
 import { EXERCISE_DEFINITIONS } from '@/data/exercises';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface OneRepMaxProps {
   workouts: WorkoutSession[];
+  selectedUserId?: string | null;
+  selectedUserLabel?: string | null;
 }
 
 // Fórmulas de 1RM
@@ -57,35 +61,115 @@ const rmPercentages = [
   { reps: 12, percentage: 70 },
 ];
 
-export function OneRepMax({ workouts }: OneRepMaxProps) {
+type DbWorkoutRow = {
+  id: string;
+  user_id: string;
+  session_date: string;
+  weekday: number | null;
+  total_volume: number | null;
+  exercises: any[] | null;
+  created_at: string | null;
+};
+
+function safeNumber(v: any): number {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = typeof v === 'number' ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function weekdayNumberToLabel(weekday?: number | null): WeekDay {
+  const map: Record<number, WeekDay> = {
+    1: 'Segunda',
+    2: 'Terça',
+    3: 'Quarta',
+    4: 'Quinta',
+    5: 'Sexta',
+    6: 'Sábado',
+    7: 'Domingo',
+  };
+  return map[weekday ?? 1] ?? 'Segunda';
+}
+
+export function OneRepMax({
+  workouts,
+  selectedUserId,
+  selectedUserLabel,
+}: OneRepMaxProps) {
+  const { user } = useAuth();
+
+  const effectiveUserId = selectedUserId || user?.id || null;
+  const isStudentMode = !!selectedUserId;
+
   const [weight, setWeight] = useState('');
   const [reps, setReps] = useState(5);
   const [selectedFormula, setSelectedFormula] = useState<FormulaKey>('epley');
+  const [dbWorkouts, setDbWorkouts] = useState<WorkoutSession[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Calcular 1RM
+  useEffect(() => {
+    const loadStudentWorkouts = async () => {
+      if (!effectiveUserId) return;
+
+      if (!isStudentMode) {
+        setDbWorkouts([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('workout_sessions')
+          .select('id,user_id,session_date,weekday,total_volume,exercises,created_at')
+          .eq('user_id', effectiveUserId)
+          .order('session_date', { ascending: true });
+
+        if (error) throw error;
+
+        const mapped: WorkoutSession[] = ((data ?? []) as DbWorkoutRow[]).map((row) => ({
+          id: row.id,
+          date: row.session_date,
+          weekDay: weekdayNumberToLabel(row.weekday),
+          exercises: Array.isArray(row.exercises) ? row.exercises : [],
+          totalVolume: safeNumber(row.total_volume),
+          duration: undefined,
+          createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+        }));
+
+        setDbWorkouts(mapped);
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Erro ao carregar records do aluno.');
+        setDbWorkouts([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadStudentWorkouts();
+  }, [effectiveUserId, isStudentMode]);
+
+  const effectiveWorkouts = isStudentMode ? dbWorkouts : workouts;
+
   const oneRepMax = useMemo(() => {
     const w = parseFloat(weight);
     if (!w || reps < 1) return 0;
     return formulas[selectedFormula](w, reps);
   }, [weight, reps, selectedFormula]);
 
-  // Tabela de cargas baseada no 1RM calculado
   const loadTable = useMemo(() => {
     if (!oneRepMax) return [];
-    return rmPercentages.map(r => ({
+    return rmPercentages.map((r) => ({
       reps: r.reps,
       weight: oneRepMax * (r.percentage / 100),
       percentage: r.percentage,
     }));
   }, [oneRepMax]);
 
-  // Encontrar PRs do usuário
   const personalRecords = useMemo(() => {
     const records: Record<string, { weight: number; reps: number; date: string }> = {};
-    
-    workouts.forEach(workout => {
-      workout.exercises.forEach(ex => {
-        ex.sets.forEach(set => {
+
+    effectiveWorkouts.forEach((workout) => {
+      workout.exercises.forEach((ex) => {
+        ex.sets.forEach((set) => {
           if (!records[ex.exerciseId] || set.weight > records[ex.exerciseId].weight) {
             records[ex.exerciseId] = {
               weight: set.weight,
@@ -97,47 +181,65 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
       });
     });
 
-    return Object.entries(records).map(([exerciseId, record]) => {
-      const exercise = EXERCISE_DEFINITIONS.find(e => e.id === exerciseId);
-      const estimated1RM = formulas.epley(record.weight, record.reps);
-      return {
-        exerciseId,
-        exerciseName: exercise?.name || exerciseId,
-        muscleGroup: exercise?.muscleGroup || '',
-        ...record,
-        estimated1RM,
-      };
-    }).sort((a, b) => b.estimated1RM - a.estimated1RM);
-  }, [workouts]);
+    return Object.entries(records)
+      .map(([exerciseId, record]) => {
+        const exercise = EXERCISE_DEFINITIONS.find((e) => e.id === exerciseId);
+        const estimated1RM = formulas.epley(record.weight, record.reps);
+        return {
+          exerciseId,
+          exerciseName: exercise?.name || exerciseId,
+          muscleGroup: exercise?.muscleGroup || '',
+          ...record,
+          estimated1RM,
+        };
+      })
+      .sort((a, b) => b.estimated1RM - a.estimated1RM);
+  }, [effectiveWorkouts]);
 
-  // Compartilhar resultado
-  const handleShare = () => {
-    const text = `💪 Meu 1RM estimado: ${oneRepMax.toFixed(1)}kg\n📊 ${formulaInfo.find(f => f.key === selectedFormula)?.name}\n🏋️ ${reps} reps com ${weight}kg`;
-    navigator.clipboard.writeText(text);
-    toast.success('Resultado copiado!');
+  const handleShare = async () => {
+    const text = `💪 Meu 1RM estimado: ${oneRepMax.toFixed(1)}kg\n📊 ${formulaInfo.find((f) => f.key === selectedFormula)?.name}\n🏋️ ${reps} reps com ${weight}kg`;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Resultado copiado!');
+    } catch {
+      toast.error('Não foi possível copiar o resultado.');
+    }
   };
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Calculadora 1RM</h1>
-          <p className="text-muted-foreground">Estime sua força máxima</p>
+          <p className="text-muted-foreground">
+            {isStudentMode ? 'Estime a força máxima do aluno selecionado' : 'Estime sua força máxima'}
+          </p>
+
+          {isStudentMode && (
+            <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary">
+              <User className="h-4 w-4" />
+              <span>
+                Visualizando dados de: <strong>{selectedUserLabel || 'Aluno selecionado'}</strong>
+              </span>
+            </div>
+          )}
+
+          {isStudentMode && loading && (
+            <p className="mt-2 text-sm text-muted-foreground">Carregando dados do aluno...</p>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Calculadora */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card className="bg-card border-border">
           <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-white">
               <Calculator className="w-5 h-5 text-primary" />
               Calcular 1RM
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Fórmula */}
             <div className="space-y-2">
               <Label>Fórmula</Label>
               <Select value={selectedFormula} onValueChange={(v) => setSelectedFormula(v as FormulaKey)}>
@@ -145,7 +247,7 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {formulaInfo.map(f => (
+                  {formulaInfo.map((f) => (
                     <SelectItem key={f.key} value={f.key}>
                       <div className="flex flex-col items-start">
                         <span>{f.name}</span>
@@ -156,11 +258,10 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                {formulaInfo.find(f => f.key === selectedFormula)?.bestFor}
+                {formulaInfo.find((f) => f.key === selectedFormula)?.bestFor}
               </p>
             </div>
 
-            {/* Peso */}
             <div className="space-y-2">
               <Label htmlFor="weight">Peso Levantado (kg)</Label>
               <Input
@@ -174,7 +275,6 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
               />
             </div>
 
-            {/* Repetições */}
             <div className="space-y-4">
               <Label>Repetições: {reps}</Label>
               <Slider
@@ -191,15 +291,14 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
               </div>
             </div>
 
-            {/* Resultado */}
             {oneRepMax > 0 && (
-              <div className="bg-gradient-to-r from-primary/20 to-purple-600/20 rounded-xl p-6 text-center">
-                <p className="text-sm text-muted-foreground mb-2">Seu 1RM Estimado</p>
+              <div className="rounded-xl bg-gradient-to-r from-primary/20 to-purple-600/20 p-6 text-center">
+                <p className="mb-2 text-sm text-muted-foreground">Seu 1RM Estimado</p>
                 <p className="text-5xl font-bold text-white">
                   {oneRepMax.toFixed(1)}
-                  <span className="text-xl text-muted-foreground ml-1">kg</span>
+                  <span className="ml-1 text-xl text-muted-foreground">kg</span>
                 </p>
-                <p className="text-sm text-muted-foreground mt-2">
+                <p className="mt-2 text-sm text-muted-foreground">
                   Baseado em {weight}kg × {reps} reps
                 </p>
                 <Button onClick={handleShare} variant="outline" className="mt-4 gap-2">
@@ -211,10 +310,9 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
           </CardContent>
         </Card>
 
-        {/* Tabela de Cargas */}
         <Card className="bg-card border-border">
           <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-white">
               <TrendingUp className="w-5 h-5 text-green-500" />
               Tabela de Cargas
             </CardTitle>
@@ -228,26 +326,26 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
                 {loadTable.map((row) => (
                   <div
                     key={row.reps}
-                    className={`flex items-center justify-between p-3 rounded-lg ${
-                      row.reps === reps ? 'bg-primary/20 border border-primary/30' : 'bg-muted/30'
+                    className={`flex items-center justify-between rounded-lg p-3 ${
+                      row.reps === reps ? 'border border-primary/30 bg-primary/20' : 'bg-muted/30'
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-sm font-medium">
                         {row.reps}
                       </span>
                       <span className="text-muted-foreground">reps</span>
                     </div>
                     <div className="text-right">
-                      <span className="text-white font-medium">{row.weight.toFixed(1)} kg</span>
-                      <span className="text-xs text-muted-foreground ml-2">({row.percentage}%)</span>
+                      <span className="font-medium text-white">{row.weight.toFixed(1)} kg</span>
+                      <span className="ml-2 text-xs text-muted-foreground">({row.percentage}%)</span>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <Info className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <div className="py-8 text-center text-muted-foreground">
+                <Info className="mx-auto mb-4 h-12 w-12 opacity-50" />
                 <p>Insira peso e repetições para ver a tabela</p>
               </div>
             )}
@@ -255,26 +353,25 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
         </Card>
       </div>
 
-      {/* Records Pessoais */}
       {personalRecords.length > 0 && (
         <Card className="bg-card border-border">
           <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-white">
               <Trophy className="w-5 h-5 text-yellow-500" />
               Seus Records (1RM Estimado)
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
               {personalRecords.slice(0, 6).map((record, index) => (
                 <div
                   key={record.exerciseId}
-                  className="bg-muted/30 rounded-lg p-4 relative overflow-hidden"
+                  className="relative overflow-hidden rounded-lg bg-muted/30 p-4"
                 >
                   {index === 0 && (
-                    <div className="absolute top-2 right-2">
+                    <div className="absolute right-2 top-2">
                       <Badge className="bg-yellow-500/20 text-yellow-400">
-                        <Trophy className="w-3 h-3 mr-1" />
+                        <Trophy className="mr-1 h-3 w-3" />
                         TOP 1
                       </Badge>
                     </div>
@@ -287,12 +384,20 @@ export function OneRepMax({ workouts }: OneRepMaxProps) {
                     </span>
                     <span className="text-sm text-muted-foreground">kg</span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     Baseado em {record.weight}kg × {record.reps} reps
                   </p>
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && personalRecords.length === 0 && (
+        <Card className="bg-card border-border">
+          <CardContent className="py-8 text-center text-muted-foreground">
+            Nenhum treino encontrado para calcular records
           </CardContent>
         </Card>
       )}

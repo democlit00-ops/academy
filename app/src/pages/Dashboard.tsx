@@ -1,78 +1,262 @@
-import { useMemo } from 'react';
-import { 
-  Activity, 
-  Heart, 
-  TrendingUp, 
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Activity,
+  Heart,
+  TrendingUp,
   Dumbbell,
   Moon,
-  Zap
+  Zap,
+  User,
 } from 'lucide-react';
 import { StatCard } from '@/components/StatCard';
 import { RecoveryScoreRing } from '@/components/RecoveryScoreRing';
 import { LineChart, BarChart, RadarChart } from '@/components/charts';
-import type { 
-  WorkoutSession, 
-  CardioSession, 
+import type {
+  WorkoutSession,
+  CardioSession,
   PhysiologicalData,
-  RecoveryScore 
+  RecoveryScore,
+  CardioType,
+  HeartRateZone,
+  WeekDay,
 } from '@/types';
-import { 
+import {
   calculateWorkoutVolume,
   calculateExerciseProgress,
   calculateExerciseVolume,
-  formatDuration
+  formatDuration,
+  calculateRecoveryScore,
 } from '@/lib/calculations';
 import { MUSCLE_GROUPS } from '@/data/exercises';
 import { format, subDays, startOfWeek, isSameWeek } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
 
 interface DashboardProps {
   workouts: WorkoutSession[];
   cardio: CardioSession[];
   physio: PhysiologicalData[];
   recoveryScores: RecoveryScore[];
+  selectedUserId?: string | null;
+  selectedUserLabel?: string | null;
 }
 
-export function Dashboard({ workouts, cardio, physio, recoveryScores }: DashboardProps) {
-  // Último dado fisiológico
+type DbWorkoutRow = {
+  id: string;
+  user_id: string;
+  session_date: string;
+  weekday: number | null;
+  total_volume: number | null;
+  exercises: any[] | null;
+  created_at: string | null;
+};
+
+type DbCardioRow = {
+  id: string;
+  user_id: string;
+  session_date: string;
+  weekday: number | null;
+  data: any | null;
+  created_at: string | null;
+};
+
+type DbPhysioRow = {
+  id: string;
+  user_id: string;
+  entry_date: string;
+  data: any;
+  created_at: string | null;
+};
+
+function safeNumber(v: any): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined;
+  const n = typeof v === 'number' ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function weekdayNumberToLabel(weekday?: number | null): WeekDay {
+  const map: Record<number, WeekDay> = {
+    1: 'Segunda',
+    2: 'Terça',
+    3: 'Quarta',
+    4: 'Quinta',
+    5: 'Sexta',
+    6: 'Sábado',
+    7: 'Domingo',
+  };
+  return map[weekday ?? 1] ?? 'Segunda';
+}
+
+export function Dashboard({
+  workouts,
+  cardio,
+  physio,
+  recoveryScores,
+  selectedUserId,
+  selectedUserLabel,
+}: DashboardProps) {
+  const { user } = useAuth();
+
+  const effectiveUserId = selectedUserId || user?.id || null;
+  const isStudentMode = !!selectedUserId;
+
+  const [dbWorkouts, setDbWorkouts] = useState<WorkoutSession[]>([]);
+  const [dbCardio, setDbCardio] = useState<CardioSession[]>([]);
+  const [dbPhysio, setDbPhysio] = useState<PhysiologicalData[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      if (!effectiveUserId) return;
+
+      if (!isStudentMode) {
+        setDbWorkouts([]);
+        setDbCardio([]);
+        setDbPhysio([]);
+        return;
+      }
+
+      setDashboardLoading(true);
+
+      try {
+        const [
+          workoutsResult,
+          cardioResult,
+          physioResult,
+        ] = await Promise.all([
+          supabase
+            .from('workout_sessions')
+            .select('id,user_id,session_date,weekday,total_volume,exercises,created_at')
+            .eq('user_id', effectiveUserId)
+            .order('session_date', { ascending: true }),
+
+          supabase
+            .from('cardio_sessions')
+            .select('id,user_id,session_date,weekday,data,created_at')
+            .eq('user_id', effectiveUserId)
+            .order('session_date', { ascending: true }),
+
+          supabase
+            .from('physio_entries')
+            .select('id,user_id,entry_date,data,created_at')
+            .eq('user_id', effectiveUserId)
+            .order('entry_date', { ascending: true })
+            .order('created_at', { ascending: true }),
+        ]);
+
+        if (workoutsResult.error) throw workoutsResult.error;
+        if (cardioResult.error) throw cardioResult.error;
+        if (physioResult.error) throw physioResult.error;
+
+        const mappedWorkouts: WorkoutSession[] = ((workoutsResult.data ?? []) as DbWorkoutRow[]).map((row) => ({
+          id: row.id,
+          date: row.session_date,
+          weekDay: weekdayNumberToLabel(row.weekday),
+          exercises: Array.isArray(row.exercises) ? row.exercises : [],
+          totalVolume: safeNumber(row.total_volume) ?? 0,
+          createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+          duration: undefined,
+        }));
+
+        const mappedCardio: CardioSession[] = ((cardioResult.data ?? []) as DbCardioRow[]).map((row) => {
+          const d = row.data ?? {};
+          return {
+            id: row.id,
+            date: row.session_date,
+            type: (d.type ?? 'Esteira') as CardioType,
+            duration: safeNumber(d.duration) ?? 0,
+            distance: safeNumber(d.distance),
+            avgSpeed: safeNumber(d.avgSpeed),
+            avgHeartRate: safeNumber(d.avgHeartRate),
+            maxHeartRate: safeNumber(d.maxHeartRate),
+            calories: safeNumber(d.calories),
+            steps: safeNumber(d.steps),
+            heartRateZone: (d.heartRateZone ?? 'Zona 2') as HeartRateZone,
+            notes: d.notes ?? undefined,
+          };
+        });
+
+        const mappedPhysio: PhysiologicalData[] = ((physioResult.data ?? []) as DbPhysioRow[]).map((row) => {
+          const d = row.data ?? {};
+          return {
+            id: row.id,
+            date: row.entry_date,
+            weight: safeNumber(d.weight),
+            restingHeartRate: safeNumber(d.restingHeartRate),
+            sleepHeartRate: safeNumber(d.sleepHeartRate),
+            sleepTotal: d.sleepTotal ?? '00:00',
+            sleepTotalHours: safeNumber(d.sleepTotalHours) ?? 0,
+            sleepREM: safeNumber(d.sleepREM),
+            sleepLight: safeNumber(d.sleepLight),
+            sleepDeep: safeNumber(d.sleepDeep),
+            awakeTime: safeNumber(d.awakeTime),
+            spo2: safeNumber(d.spo2),
+            respiratoryRate: safeNumber(d.respiratoryRate),
+            fatigue: safeNumber(d.fatigue) ?? 5,
+            notes: d.notes ?? undefined,
+          };
+        });
+
+        setDbWorkouts(mappedWorkouts);
+        setDbCardio(mappedCardio);
+        setDbPhysio(mappedPhysio);
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Erro ao carregar dashboard do aluno.');
+        setDbWorkouts([]);
+        setDbCardio([]);
+        setDbPhysio([]);
+      } finally {
+        setDashboardLoading(false);
+      }
+    };
+
+    void loadDashboardData();
+  }, [effectiveUserId, isStudentMode]);
+
+  const effectiveWorkouts = isStudentMode ? dbWorkouts : workouts;
+  const effectiveCardio = isStudentMode ? dbCardio : cardio;
+  const effectivePhysio = isStudentMode ? dbPhysio : physio;
+  const effectiveRecoveryScores = useMemo(() => {
+    if (isStudentMode) {
+      return effectivePhysio.map((p) => calculateRecoveryScore(p));
+    }
+    return recoveryScores;
+  }, [isStudentMode, effectivePhysio, recoveryScores]);
+
   const latestPhysio = useMemo(() => {
-    return physio[physio.length - 1];
-  }, [physio]);
+    return effectivePhysio[effectivePhysio.length - 1];
+  }, [effectivePhysio]);
 
-  // Último recovery score
   const latestRecovery = useMemo(() => {
-    return recoveryScores[recoveryScores.length - 1];
-  }, [recoveryScores]);
+    return effectiveRecoveryScores[effectiveRecoveryScores.length - 1];
+  }, [effectiveRecoveryScores]);
 
-  // Dados para gráfico de evolução de força
   const strengthProgressData = useMemo(() => {
-    const progress = calculateExerciseProgress(workouts);
-    // Pegar os 3 exercícios mais recentes
+    const progress = calculateExerciseProgress(effectiveWorkouts);
     const topExercises = progress.slice(0, 3);
-    
-    // Criar dados para o gráfico
-    const dates = [...new Set(workouts.map(w => w.date))].sort();
-    
-    return dates.map(date => {
+    const dates = [...new Set(effectiveWorkouts.map((w) => w.date))].sort();
+
+    return dates.map((date) => {
       const point: Record<string, any> = { date, label: format(new Date(date), 'dd/MM') };
-      topExercises.forEach(ex => {
-        const dayData = ex.history.find(h => h.date === date);
+      topExercises.forEach((ex) => {
+        const dayData = ex.history.find((h) => h.date === date);
         point[ex.exerciseName] = dayData?.maxWeight || 0;
       });
       return point;
     });
-  }, [workouts]);
+  }, [effectiveWorkouts]);
 
   const strengthLines = useMemo(() => {
-    const progress = calculateExerciseProgress(workouts);
+    const progress = calculateExerciseProgress(effectiveWorkouts);
     return progress.slice(0, 3).map((ex, i) => ({
       key: ex.exerciseName,
       name: ex.exerciseName,
       color: ['#3b82f6', '#22c55e', '#f59e0b'][i],
     }));
-  }, [workouts]);
+  }, [effectiveWorkouts]);
 
-  // Dados para gráfico de cardio semanal
   const cardioData = useMemo(() => {
     const last4Weeks = Array.from({ length: 4 }, (_, i) => {
       const date = subDays(new Date(), i * 7);
@@ -84,9 +268,9 @@ export function Dashboard({ workouts, cardio, physio, recoveryScores }: Dashboar
       };
     }).reverse();
 
-    cardio.forEach(session => {
+    effectiveCardio.forEach((session) => {
       const sessionDate = new Date(session.date);
-      const weekData = last4Weeks.find(w => {
+      const weekData = last4Weeks.find((w) => {
         const weekDate = new Date(w.week.split('/').reverse().join('-'));
         return isSameWeek(sessionDate, weekDate, { weekStartsOn: 1 });
       });
@@ -97,82 +281,90 @@ export function Dashboard({ workouts, cardio, physio, recoveryScores }: Dashboar
     });
 
     return last4Weeks;
-  }, [cardio]);
+  }, [effectiveCardio]);
 
-  // Dados para gráfico de recuperação
   const recoveryData = useMemo(() => {
-    return recoveryScores.slice(-7).map(r => ({
+    return effectiveRecoveryScores.slice(-7).map((r) => ({
       date: r.date,
       label: format(new Date(r.date), 'dd/MM'),
       score: r.score,
     }));
-  }, [recoveryScores]);
+  }, [effectiveRecoveryScores]);
 
-  // Dados para radar de grupos musculares
   const muscleRadarData = useMemo(() => {
     const now = new Date();
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
+
     const muscleVolumes: Record<string, number> = {};
-    MUSCLE_GROUPS.forEach(mg => muscleVolumes[mg] = 0);
-    
-    workouts.forEach(workout => {
+    MUSCLE_GROUPS.forEach((mg) => {
+      muscleVolumes[mg] = 0;
+    });
+
+    effectiveWorkouts.forEach((workout) => {
       if (new Date(workout.date) >= oneWeekAgo) {
-        workout.exercises.forEach(ex => {
+        workout.exercises.forEach((ex) => {
           const volume = calculateExerciseVolume(ex);
           muscleVolumes[ex.muscleGroup] = (muscleVolumes[ex.muscleGroup] || 0) + volume;
         });
       }
     });
-    
+
     const maxVolume = Math.max(...Object.values(muscleVolumes), 1);
-    
-    return MUSCLE_GROUPS.map(mg => ({
+
+    return MUSCLE_GROUPS.map((mg) => ({
       subject: mg,
       value: Math.round(((muscleVolumes[mg] || 0) / maxVolume) * 100),
       fullMark: 100,
     }));
-  }, [workouts]);
+  }, [effectiveWorkouts]);
 
-  // Total de treinos esta semana
   const weeklyWorkouts = useMemo(() => {
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-    return workouts.filter(w => new Date(w.date) >= weekStart).length;
-  }, [workouts]);
+    return effectiveWorkouts.filter((w) => new Date(w.date) >= weekStart).length;
+  }, [effectiveWorkouts]);
 
-  // Volume total da semana
   const weeklyVolume = useMemo(() => {
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-    return workouts
-      .filter(w => new Date(w.date) >= weekStart)
+    return effectiveWorkouts
+      .filter((w) => new Date(w.date) >= weekStart)
       .reduce((total, w) => total + calculateWorkoutVolume(w), 0);
-  }, [workouts]);
+  }, [effectiveWorkouts]);
 
-  // Tempo total de cardio
   const weeklyCardioMinutes = useMemo(() => {
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-    return cardio
-      .filter(c => new Date(c.date) >= weekStart)
+    return effectiveCardio
+      .filter((c) => new Date(c.date) >= weekStart)
       .reduce((total, c) => total + c.duration, 0);
-  }, [cardio]);
+  }, [effectiveCardio]);
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Dashboard</h1>
           <p className="text-muted-foreground">
             {format(new Date(), "EEEE, d 'de' MMMM", { locale: ptBR })}
           </p>
+
+          {isStudentMode && (
+            <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary">
+              <User className="h-4 w-4" />
+              <span>
+                Visualizando dados de: <strong>{selectedUserLabel || 'Aluno selecionado'}</strong>
+              </span>
+            </div>
+          )}
+
+          {isStudentMode && dashboardLoading && (
+            <p className="mt-2 text-sm text-muted-foreground">Carregando dados do aluno...</p>
+          )}
         </div>
       </div>
 
-      {/* Recovery Score - Destaque */}
       {latestRecovery && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-1 bg-card rounded-xl border border-border p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Recovery Score</h3>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="rounded-xl border border-border bg-card p-6 lg:col-span-1">
+            <h3 className="mb-4 text-lg font-semibold text-white">Recovery Score</h3>
             <div className="flex justify-center">
               <RecoveryScoreRing score={latestRecovery.score} size={140} />
             </div>
@@ -181,9 +373,9 @@ export function Dashboard({ workouts, cardio, physio, recoveryScores }: Dashboar
                 <span className="text-muted-foreground">Sono</span>
                 <span className="text-white">{latestRecovery.sleepContribution}%</span>
               </div>
-              <div className="w-full bg-muted rounded-full h-1.5">
-                <div 
-                  className="bg-blue-500 h-1.5 rounded-full transition-all"
+              <div className="h-1.5 w-full rounded-full bg-muted">
+                <div
+                  className="h-1.5 rounded-full bg-blue-500 transition-all"
                   style={{ width: `${latestRecovery.sleepContribution}%` }}
                 />
               </div>
@@ -191,9 +383,9 @@ export function Dashboard({ workouts, cardio, physio, recoveryScores }: Dashboar
                 <span className="text-muted-foreground">FC Repouso</span>
                 <span className="text-white">{latestRecovery.hrContribution}%</span>
               </div>
-              <div className="w-full bg-muted rounded-full h-1.5">
-                <div 
-                  className="bg-green-500 h-1.5 rounded-full transition-all"
+              <div className="h-1.5 w-full rounded-full bg-muted">
+                <div
+                  className="h-1.5 rounded-full bg-green-500 transition-all"
                   style={{ width: `${latestRecovery.hrContribution}%` }}
                 />
               </div>
@@ -201,67 +393,64 @@ export function Dashboard({ workouts, cardio, physio, recoveryScores }: Dashboar
                 <span className="text-muted-foreground">Cansaço</span>
                 <span className="text-white">{latestRecovery.fatigueContribution}%</span>
               </div>
-              <div className="w-full bg-muted rounded-full h-1.5">
-                <div 
-                  className="bg-orange-500 h-1.5 rounded-full transition-all"
+              <div className="h-1.5 w-full rounded-full bg-muted">
+                <div
+                  className="h-1.5 rounded-full bg-orange-500 transition-all"
                   style={{ width: `${latestRecovery.fatigueContribution}%` }}
                 />
               </div>
             </div>
           </div>
 
-          {/* Cards de estatísticas */}
-          <div className="lg:col-span-2 grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 lg:col-span-2">
             <StatCard
               title="Treinos esta semana"
               value={weeklyWorkouts}
               unit="treinos"
-              icon={<Dumbbell className="w-5 h-5" />}
+              icon={<Dumbbell className="h-5 w-5" />}
               variant="blue"
             />
             <StatCard
               title="Volume semanal"
               value={(weeklyVolume / 1000).toFixed(1)}
               unit="ton"
-              icon={<TrendingUp className="w-5 h-5" />}
+              icon={<TrendingUp className="h-5 w-5" />}
               variant="green"
             />
             <StatCard
               title="Cardio semanal"
               value={formatDuration(weeklyCardioMinutes)}
-              icon={<Heart className="w-5 h-5" />}
+              icon={<Heart className="h-5 w-5" />}
               variant="orange"
             />
             <StatCard
               title="FC Repouso"
               value={latestPhysio?.restingHeartRate || '--'}
               unit="bpm"
-              icon={<Activity className="w-5 h-5" />}
+              icon={<Activity className="h-5 w-5" />}
               variant="purple"
             />
             <StatCard
               title="Sono"
               value={latestPhysio?.sleepTotalHours?.toFixed(1) || '--'}
               unit="h"
-              icon={<Moon className="w-5 h-5" />}
+              icon={<Moon className="h-5 w-5" />}
               variant="blue"
             />
             <StatCard
               title="Cansaço"
               value={latestPhysio?.fatigue || '--'}
               unit="/10"
-              icon={<Zap className="w-5 h-5" />}
+              icon={<Zap className="h-5 w-5" />}
               variant={latestPhysio && latestPhysio.fatigue > 7 ? 'red' : 'green'}
             />
           </div>
         </div>
       )}
 
-      {/* Gráficos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Evolução de força */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="text-lg font-semibold text-white mb-4">Evolução de Força</h3>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="rounded-xl border border-border bg-card p-4">
+          <h3 className="mb-4 text-lg font-semibold text-white">Evolução de Força</h3>
           <LineChart
             data={strengthProgressData}
             lines={strengthLines}
@@ -272,14 +461,11 @@ export function Dashboard({ workouts, cardio, physio, recoveryScores }: Dashboar
           />
         </div>
 
-        {/* Cardio semanal */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="text-lg font-semibold text-white mb-4">Cardio Semanal</h3>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <h3 className="mb-4 text-lg font-semibold text-white">Cardio Semanal</h3>
           <BarChart
             data={cardioData}
-            bars={[
-              { key: 'minutes', name: 'Minutos' },
-            ]}
+            bars={[{ key: 'minutes', name: 'Minutos' }]}
             xAxisKey="week"
             yAxisFormatter={(v: number) => `${v}min`}
             tooltipFormatter={(v: number) => [`${v} min`, 'Duração']}
@@ -288,14 +474,11 @@ export function Dashboard({ workouts, cardio, physio, recoveryScores }: Dashboar
           />
         </div>
 
-        {/* Recuperação fisiológica */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="text-lg font-semibold text-white mb-4">Recuperação (7 dias)</h3>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <h3 className="mb-4 text-lg font-semibold text-white">Recuperação (7 dias)</h3>
           <LineChart
             data={recoveryData}
-            lines={[
-              { key: 'score', name: 'Recovery Score', color: '#22c55e' },
-            ]}
+            lines={[{ key: 'score', name: 'Recovery Score', color: '#22c55e' }]}
             xAxisKey="label"
             yAxisFormatter={(v: number) => `${v}`}
             tooltipFormatter={(v: number) => [`${v}`, 'Score']}
@@ -303,9 +486,8 @@ export function Dashboard({ workouts, cardio, physio, recoveryScores }: Dashboar
           />
         </div>
 
-        {/* Distribuição por grupo muscular */}
-        <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="text-lg font-semibold text-white mb-4">Volume por Grupo Muscular</h3>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <h3 className="mb-4 text-lg font-semibold text-white">Volume por Grupo Muscular</h3>
           <RadarChart
             data={muscleRadarData}
             dataKey="value"

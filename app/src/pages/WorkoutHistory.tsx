@@ -1,91 +1,225 @@
-import { useState, useMemo } from 'react';
-import { Calendar, Filter, TrendingUp } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { LineChart } from '@/components/charts';
-import type { WorkoutSession } from '@/types';
-import { EXERCISE_DEFINITIONS, MUSCLE_GROUPS } from '@/data/exercises';
-import { calculateWorkoutVolume, calculateExerciseProgress, formatWeight } from '@/lib/calculations';
-import { format, parseISO, startOfDay, endOfDay } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react'
+import { Calendar, Filter, TrendingUp } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { LineChart } from '@/components/charts'
+import type { WorkoutSession, WeekDay, MuscleGroup, WorkoutExercise } from '@/types'
+import { MUSCLE_GROUPS } from '@/data/exercises'
+import { calculateWorkoutVolume, calculateExerciseProgress, formatWeight } from '@/lib/calculations'
+import { format, parseISO, startOfDay, endOfDay } from 'date-fns'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
 
-interface WorkoutHistoryProps {
-  workouts: WorkoutSession[];
+type DbWorkoutSession = {
+  id: string
+  user_id: string
+  session_date: string // yyyy-mm-dd
+  weekday: number
+  total_volume: number
+  exercises: any // jsonb (array)
+  created_at: string
 }
 
-export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
-  const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<string>('all');
-  const [selectedExercise, setSelectedExercise] = useState<string>('all');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+type DbExercise = {
+  id: string
+  name: string
+  muscle_group: string
+  is_active: boolean
+}
+
+const weekdayLabel = (n: number): WeekDay => {
+  const map: Record<number, WeekDay> = {
+    1: 'Segunda',
+    2: 'Terça',
+    3: 'Quarta',
+    4: 'Quinta',
+    5: 'Sexta',
+    6: 'Sábado',
+    7: 'Domingo',
+  }
+  return map[n] ?? 'Segunda'
+}
+
+function coerceNumber(v: any, fallback = 0) {
+  const n = typeof v === 'number' ? v : parseFloat(String(v))
+  return Number.isFinite(n) ? n : fallback
+}
+
+function mapDbToWorkoutSession(row: DbWorkoutSession): WorkoutSession {
+  const exercisesRaw = Array.isArray(row.exercises) ? row.exercises : []
+
+  const exercises: WorkoutExercise[] = exercisesRaw.map((ex: any) => ({
+    id: ex.id ?? crypto.randomUUID(),
+    exerciseId: ex.exerciseId ?? '',
+    exerciseName: ex.exerciseName ?? ex.name ?? '',
+    muscleGroup: (ex.muscleGroup ?? 'Peito') as MuscleGroup,
+    sets: Array.isArray(ex.sets)
+      ? ex.sets.map((s: any) => ({ reps: coerceNumber(s.reps, 0), weight: coerceNumber(s.weight, 0) }))
+      : [{ reps: 0, weight: 0 }],
+    rpe: coerceNumber(ex.rpe, 7),
+    avgHeartRate: ex.avgHeartRate ?? undefined,
+    maxHeartRate: ex.maxHeartRate ?? undefined,
+    notes: ex.notes ?? undefined,
+  }))
+
+  return {
+    id: row.id,
+    date: row.session_date,
+    weekDay: weekdayLabel(row.weekday),
+    exercises,
+    totalVolume: row.total_volume ?? 0,
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+  }
+}
+
+type WorkoutHistoryProps = {
+  selectedUserId?: string
+}
+
+export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
+  const { user, profile } = useAuth()
+  const role = profile?.role ?? 'user'
+
+  const effectiveUserId = selectedUserId || user?.id || ''
+
+  const [loading, setLoading] = useState(true)
+  const [workouts, setWorkouts] = useState<WorkoutSession[]>([])
+  const [dbExercises, setDbExercises] = useState<DbExercise[]>([])
+
+  const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<string>('all')
+  const [selectedExercise, setSelectedExercise] = useState<string>('all')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+
+  // Proteção simples: se tentar ver outro user sem ser coach/admin, não busca
+  const canViewTarget =
+    !!user &&
+    (!!effectiveUserId) &&
+    (effectiveUserId === user.id || role === 'coach' || role === 'admin')
+
+  // 1) carregar lista de exercícios (para filtro)
+  useEffect(() => {
+    const loadExercises = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('exercises')
+          .select('id,name,muscle_group,is_active')
+          .eq('is_active', true)
+          .order('name', { ascending: true })
+
+        if (error) throw error
+        setDbExercises((data ?? []) as DbExercise[])
+      } catch {
+        setDbExercises([])
+      }
+    }
+    void loadExercises()
+  }, [])
+
+  // 2) carregar histórico do supabase (do user alvo)
+  useEffect(() => {
+    if (!user) return
+
+    const loadWorkouts = async () => {
+      setLoading(true)
+      try {
+        if (!canViewTarget) {
+          setWorkouts([])
+          return
+        }
+
+        const { data, error } = await supabase
+          .from('workout_sessions')
+          .select('id,user_id,session_date,weekday,total_volume,exercises,created_at')
+          .eq('user_id', effectiveUserId)
+          .order('session_date', { ascending: false })
+
+        if (error) throw error
+
+        const mapped = (data ?? []).map((r: any) => mapDbToWorkoutSession(r as DbWorkoutSession))
+        setWorkouts(mapped)
+      } catch {
+        setWorkouts([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    void loadWorkouts()
+  }, [user, effectiveUserId, canViewTarget])
 
   // Filtrar treinos
   const filteredWorkouts = useMemo(() => {
-    return workouts.filter(workout => {
-      // Filtro por grupo muscular
-      if (selectedMuscleGroup !== 'all') {
-        const hasMuscleGroup = workout.exercises.some(
-          e => e.muscleGroup === selectedMuscleGroup
-        );
-        if (!hasMuscleGroup) return false;
-      }
+    return workouts
+      .filter((workout) => {
+        if (selectedMuscleGroup !== 'all') {
+          const hasMuscleGroup = workout.exercises.some((e) => e.muscleGroup === selectedMuscleGroup)
+          if (!hasMuscleGroup) return false
+        }
 
-      // Filtro por exercício
-      if (selectedExercise !== 'all') {
-        const hasExercise = workout.exercises.some(
-          e => e.exerciseId === selectedExercise
-        );
-        if (!hasExercise) return false;
-      }
+        if (selectedExercise !== 'all') {
+          const hasExercise = workout.exercises.some((e) => e.exerciseId === selectedExercise)
+          if (!hasExercise) return false
+        }
 
-      // Filtro por data
-      if (startDate || endDate) {
-        const workoutDate = parseISO(workout.date);
-        const start = startDate ? startOfDay(parseISO(startDate)) : null;
-        const end = endDate ? endOfDay(parseISO(endDate)) : null;
-        
-        if (start && workoutDate < start) return false;
-        if (end && workoutDate > end) return false;
-      }
+        if (startDate || endDate) {
+          const workoutDate = parseISO(workout.date)
+          const start = startDate ? startOfDay(parseISO(startDate)) : null
+          const end = endDate ? endOfDay(parseISO(endDate)) : null
 
-      return true;
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [workouts, selectedMuscleGroup, selectedExercise, startDate, endDate]);
+          if (start && workoutDate < start) return false
+          if (end && workoutDate > end) return false
+        }
+
+        return true
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  }, [workouts, selectedMuscleGroup, selectedExercise, startDate, endDate])
 
   // Dados para gráfico de evolução
   const progressData = useMemo(() => {
-    if (selectedExercise === 'all') return [];
-    
-    const progress = calculateExerciseProgress(workouts, selectedExercise);
-    if (progress.length === 0) return [];
-    
-    return progress[0].history.map(h => ({
+    if (selectedExercise === 'all') return []
+
+    const progress = calculateExerciseProgress(workouts, selectedExercise)
+    if (progress.length === 0) return []
+
+    return progress[0].history.map((h) => ({
       date: h.date,
       label: format(new Date(h.date), 'dd/MM'),
       maxWeight: h.maxWeight,
       volume: h.totalVolume,
-    }));
-  }, [workouts, selectedExercise]);
+    }))
+  }, [workouts, selectedExercise])
 
   // Estatísticas
   const stats = useMemo(() => {
-    const totalWorkouts = filteredWorkouts.length;
-    const totalVolume = filteredWorkouts.reduce((sum, w) => sum + calculateWorkoutVolume(w), 0);
-    const avgVolume = totalWorkouts > 0 ? totalVolume / totalWorkouts : 0;
-    
-    return { totalWorkouts, totalVolume, avgVolume };
-  }, [filteredWorkouts]);
+    const totalWorkouts = filteredWorkouts.length
+    const totalVolume = filteredWorkouts.reduce((sum, w) => sum + calculateWorkoutVolume(w), 0)
+    const avgVolume = totalWorkouts > 0 ? totalVolume / totalWorkouts : 0
+    return { totalWorkouts, totalVolume, avgVolume }
+  }, [filteredWorkouts])
 
   const clearFilters = () => {
-    setSelectedMuscleGroup('all');
-    setSelectedExercise('all');
-    setStartDate('');
-    setEndDate('');
-  };
+    setSelectedMuscleGroup('all')
+    setSelectedExercise('all')
+    setStartDate('')
+    setEndDate('')
+  }
+
+  // Se não tiver permissão para ver o alvo
+  if (user && effectiveUserId && !canViewTarget) {
+    return (
+      <div className="space-y-2">
+        <h1 className="text-2xl font-bold text-white">Histórico de Treinos</h1>
+        <p className="text-white/70">Sem permissão para visualizar este aluno.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
@@ -93,7 +227,9 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Histórico de Treinos</h1>
-          <p className="text-muted-foreground">Visualize e filtre seus treinos</p>
+          <p className="text-muted-foreground">
+            {loading ? 'Carregando do servidor...' : 'Visualize e filtre seus treinos'}
+          </p>
         </div>
       </div>
 
@@ -117,9 +253,7 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
         <Card className="bg-card border-border">
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground mb-1">Volume Médio</p>
-            <p className="text-2xl font-bold text-white">
-              {formatWeight(stats.avgVolume)}
-            </p>
+            <p className="text-2xl font-bold text-white">{formatWeight(stats.avgVolume)}</p>
           </CardContent>
         </Card>
       </div>
@@ -142,12 +276,15 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {MUSCLE_GROUPS.map(mg => (
-                    <SelectItem key={mg} value={mg}>{mg}</SelectItem>
+                  {MUSCLE_GROUPS.map((mg) => (
+                    <SelectItem key={mg} value={mg}>
+                      {mg}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-2">
               <Label className="text-sm text-muted-foreground">Exercício</Label>
               <Select value={selectedExercise} onValueChange={setSelectedExercise}>
@@ -156,12 +293,15 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {EXERCISE_DEFINITIONS.map(ex => (
-                    <SelectItem key={ex.id} value={ex.id}>{ex.name}</SelectItem>
+                  {dbExercises.map((ex) => (
+                    <SelectItem key={ex.id} value={ex.id}>
+                      {ex.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-2">
               <Label className="text-sm text-muted-foreground">Data Inicial</Label>
               <Input
@@ -171,6 +311,7 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
                 className="bg-background border-border"
               />
             </div>
+
             <div className="space-y-2">
               <Label className="text-sm text-muted-foreground">Data Final</Label>
               <div className="flex gap-2">
@@ -189,7 +330,7 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
         </CardContent>
       </Card>
 
-      {/* Gráfico de evolução (se exercício selecionado) */}
+      {/* Gráfico */}
       {selectedExercise !== 'all' && progressData.length > 0 && (
         <Card className="bg-card border-border">
           <CardHeader>
@@ -213,7 +354,7 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
         </Card>
       )}
 
-      {/* Lista de treinos */}
+      {/* Lista */}
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle className="text-white text-base flex items-center gap-2">
@@ -236,12 +377,8 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
               <TableBody>
                 {filteredWorkouts.map((workout) => (
                   <TableRow key={workout.id} className="border-border">
-                    <TableCell className="text-white">
-                      {format(new Date(workout.date), 'dd/MM/yyyy')}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {workout.weekDay}
-                    </TableCell>
+                    <TableCell className="text-white">{format(new Date(workout.date), 'dd/MM/yyyy')}</TableCell>
+                    <TableCell className="text-muted-foreground">{workout.weekDay}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         {workout.exercises.map((ex, i) => (
@@ -251,9 +388,7 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
                         ))}
                       </div>
                     </TableCell>
-                    <TableCell className="text-white">
-                      {formatWeight(calculateWorkoutVolume(workout))}
-                    </TableCell>
+                    <TableCell className="text-white">{formatWeight(calculateWorkoutVolume(workout))}</TableCell>
                     <TableCell>
                       {workout.exercises.length > 0 ? (
                         <span className="text-white">
@@ -265,10 +400,19 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
                     </TableCell>
                   </TableRow>
                 ))}
-                {filteredWorkouts.length === 0 && (
+
+                {!loading && filteredWorkouts.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
                       Nenhum treino encontrado com os filtros selecionados
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {loading && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                      Carregando histórico...
                     </TableCell>
                   </TableRow>
                 )}
@@ -278,5 +422,5 @@ export function WorkoutHistory({ workouts }: WorkoutHistoryProps) {
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }

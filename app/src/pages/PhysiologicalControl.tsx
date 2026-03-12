@@ -1,39 +1,132 @@
-import { useState } from 'react';
-import { Activity, Moon, Save, Heart, Wind, Droplets } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Slider } from '@/components/ui/slider';
-import { toast } from 'sonner';
-import type { PhysiologicalData } from '@/types';
-import { parseTimeToDecimal } from '@/lib/calculations';
-import { format } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react'
+import { Activity, Moon, Save, Heart, Wind, Droplets, History, User } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Slider } from '@/components/ui/slider'
+import { toast } from 'sonner'
+import type { PhysiologicalData } from '@/types'
+import { parseTimeToDecimal } from '@/lib/calculations'
+import { format } from 'date-fns'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface PhysiologicalControlProps {
-  onSave: (data: PhysiologicalData) => void;
-  physioData: PhysiologicalData[];
+  onSave: (data: PhysiologicalData) => void
+  physioData: PhysiologicalData[]
+  selectedUserId?: string | null
+  selectedUserLabel?: string | null
 }
 
-export function PhysiologicalControl({ onSave, physioData }: PhysiologicalControlProps) {
-  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [weight, setWeight] = useState('');
-  const [restingHR, setRestingHR] = useState('');
-  const [sleepHR, setSleepHR] = useState('');
-  const [sleepTotal, setSleepTotal] = useState('07:00');
-  const [sleepREM, setSleepREM] = useState('');
-  const [sleepLight, setSleepLight] = useState('');
-  const [sleepDeep, setSleepDeep] = useState('');
-  const [awakeTime, setAwakeTime] = useState('');
-  const [spo2, setSpo2] = useState('');
-  const [respiratoryRate, setRespiratoryRate] = useState('');
-  const [fatigue, setFatigue] = useState(5);
-  const [notes, setNotes] = useState('');
+type DbPhysioRow = {
+  id: string
+  user_id: string
+  entry_date: string
+  data: any
+  created_at: string | null
+}
+
+function safeNumber(v: any): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined
+  const n = typeof v === 'number' ? v : parseFloat(String(v))
+  return Number.isFinite(n) ? n : undefined
+}
+
+export function PhysiologicalControl({
+  onSave,
+  physioData,
+  selectedUserId,
+  selectedUserLabel,
+}: PhysiologicalControlProps) {
+  const { user } = useAuth()
+
+  const effectiveUserId = selectedUserId || user?.id || null
+  const isStudentMode = !!selectedUserId
+
+  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [weight, setWeight] = useState('')
+  const [restingHR, setRestingHR] = useState('')
+  const [sleepHR, setSleepHR] = useState('')
+  const [sleepTotal, setSleepTotal] = useState('07:00')
+  const [sleepREM, setSleepREM] = useState('')
+  const [sleepLight, setSleepLight] = useState('')
+  const [sleepDeep, setSleepDeep] = useState('')
+  const [awakeTime, setAwakeTime] = useState('')
+  const [spo2, setSpo2] = useState('')
+  const [respiratoryRate, setRespiratoryRate] = useState('')
+  const [fatigue, setFatigue] = useState(5)
+  const [notes, setNotes] = useState('')
+
+  // Histórico (Supabase)
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [history, setHistory] = useState<PhysiologicalData[]>([])
 
   // Calcular sono total em horas decimais
-  const sleepTotalHours = parseTimeToDecimal(sleepTotal);
+  const sleepTotalHours = parseTimeToDecimal(sleepTotal)
+
+  const loadHistory = async () => {
+    if (!effectiveUserId) return
+
+    setHistoryLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('physio_entries')
+        .select('id,user_id,entry_date,data,created_at')
+        .eq('user_id', effectiveUserId)
+        .order('entry_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(30)
+
+      if (error) throw error
+
+      const mapped = ((data ?? []) as DbPhysioRow[]).map((row) => {
+        const d = row.data ?? {}
+
+        const item: PhysiologicalData = {
+          id: row.id,
+          date: row.entry_date,
+          weight: safeNumber(d.weight),
+          restingHeartRate: safeNumber(d.restingHeartRate),
+          sleepHeartRate: safeNumber(d.sleepHeartRate),
+          sleepTotal: d.sleepTotal ?? '00:00',
+          sleepTotalHours:
+            safeNumber(d.sleepTotalHours) ?? parseTimeToDecimal(d.sleepTotal ?? '00:00'),
+          sleepREM: safeNumber(d.sleepREM),
+          sleepLight: safeNumber(d.sleepLight),
+          sleepDeep: safeNumber(d.sleepDeep),
+          awakeTime: safeNumber(d.awakeTime),
+          spo2: safeNumber(d.spo2),
+          respiratoryRate: safeNumber(d.respiratoryRate),
+          fatigue: safeNumber(d.fatigue) ?? 5,
+          notes: d.notes ?? undefined,
+        }
+
+        return item
+      })
+
+      setHistory(mapped)
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao carregar histórico fisiológico.')
+      setHistory([])
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadHistory()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveUserId])
 
   const handleSubmit = () => {
+    if (isStudentMode) {
+      toast.error('No Modo Aluno, o registro está apenas para visualização por enquanto.')
+      return
+    }
+
     const data: PhysiologicalData = {
       id: crypto.randomUUID(),
       date,
@@ -50,28 +143,35 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
       respiratoryRate: respiratoryRate ? parseInt(respiratoryRate) : undefined,
       fatigue,
       notes: notes || undefined,
-    };
+    }
 
-    onSave(data);
-    toast.success('Dados fisiológicos salvos!');
+    onSave(data)
+    toast.success('Dados fisiológicos salvos!')
+
+    // otimista + recarrega do servidor
+    setHistory((prev) => [data, ...prev].slice(0, 30))
+    void loadHistory()
 
     // Reset
-    setWeight('');
-    setRestingHR('');
-    setSleepHR('');
-    setSleepTotal('07:00');
-    setSleepREM('');
-    setSleepLight('');
-    setSleepDeep('');
-    setAwakeTime('');
-    setSpo2('');
-    setRespiratoryRate('');
-    setFatigue(5);
-    setNotes('');
-  };
+    setWeight('')
+    setRestingHR('')
+    setSleepHR('')
+    setSleepTotal('07:00')
+    setSleepREM('')
+    setSleepLight('')
+    setSleepDeep('')
+    setAwakeTime('')
+    setSpo2('')
+    setRespiratoryRate('')
+    setFatigue(5)
+    setNotes('')
+  }
 
-  // Último registro
-  const latestData = physioData[physioData.length - 1];
+  // Último registro: prioriza banco
+  const latestData = useMemo(() => {
+    if (history.length > 0) return history[0]
+    return physioData[physioData.length - 1]
+  }, [history, physioData])
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
@@ -79,58 +179,74 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Controle Fisiológico</h1>
-          <p className="text-muted-foreground">Monitore seus indicadores de recuperação</p>
+          <p className="text-muted-foreground">
+            {isStudentMode
+              ? 'Visualize os indicadores fisiológicos do aluno selecionado'
+              : 'Monitore seus indicadores de recuperação'}
+          </p>
+
+          {isStudentMode && (
+            <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary">
+              <User className="h-4 w-4" />
+              <span>
+                Visualizando dados de: <strong>{selectedUserLabel || 'Aluno selecionado'}</strong>
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Cards de resumo */}
       {latestData && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Card className="bg-card border-border">
             <CardContent className="pt-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                <Activity className="w-4 h-4" />
+              <div className="mb-1 flex items-center gap-2 text-muted-foreground">
+                <Activity className="h-4 w-4" />
                 <span className="text-xs">FC Repouso</span>
               </div>
               <p className="text-2xl font-bold text-white">
                 {latestData.restingHeartRate || '--'}
-                <span className="text-sm font-normal text-muted-foreground ml-1">bpm</span>
+                <span className="ml-1 text-sm font-normal text-muted-foreground">bpm</span>
               </p>
             </CardContent>
           </Card>
+
           <Card className="bg-card border-border">
             <CardContent className="pt-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                <Moon className="w-4 h-4" />
+              <div className="mb-1 flex items-center gap-2 text-muted-foreground">
+                <Moon className="h-4 w-4" />
                 <span className="text-xs">Sono</span>
               </div>
               <p className="text-2xl font-bold text-white">
                 {latestData.sleepTotalHours?.toFixed(1) || '--'}
-                <span className="text-sm font-normal text-muted-foreground ml-1">h</span>
+                <span className="ml-1 text-sm font-normal text-muted-foreground">h</span>
               </p>
             </CardContent>
           </Card>
+
           <Card className="bg-card border-border">
             <CardContent className="pt-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                <Droplets className="w-4 h-4" />
+              <div className="mb-1 flex items-center gap-2 text-muted-foreground">
+                <Droplets className="h-4 w-4" />
                 <span className="text-xs">SpO2</span>
               </div>
               <p className="text-2xl font-bold text-white">
                 {latestData.spo2 || '--'}
-                <span className="text-sm font-normal text-muted-foreground ml-1">%</span>
+                <span className="ml-1 text-sm font-normal text-muted-foreground">%</span>
               </p>
             </CardContent>
           </Card>
+
           <Card className="bg-card border-border">
             <CardContent className="pt-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                <Wind className="w-4 h-4" />
+              <div className="mb-1 flex items-center gap-2 text-muted-foreground">
+                <Wind className="h-4 w-4" />
                 <span className="text-xs">Respiração</span>
               </div>
               <p className="text-2xl font-bold text-white">
                 {latestData.respiratoryRate || '--'}
-                <span className="text-sm font-normal text-muted-foreground ml-1">rpm</span>
+                <span className="ml-1 text-sm font-normal text-muted-foreground">rpm</span>
               </p>
             </CardContent>
           </Card>
@@ -140,14 +256,20 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
       {/* Formulário */}
       <Card className="bg-card border-border">
         <CardHeader>
-          <CardTitle className="text-white flex items-center gap-2">
-            <Heart className="w-5 h-5 text-red-500" />
+          <CardTitle className="flex items-center gap-2 text-white">
+            <Heart className="h-5 w-5 text-red-500" />
             Novo Registro
+            {isStudentMode && (
+              <Badge variant="secondary" className="ml-2">
+                Somente visualização
+              </Badge>
+            )}
           </CardTitle>
         </CardHeader>
+
         <CardContent className="space-y-6">
           {/* Data e Peso */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="date">Data</Label>
               <Input
@@ -156,8 +278,10 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className="bg-background border-border"
+                disabled={isStudentMode}
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="weight">Peso (kg)</Label>
               <Input
@@ -168,8 +292,10 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                 value={weight}
                 onChange={(e) => setWeight(e.target.value)}
                 className="bg-background border-border"
+                disabled={isStudentMode}
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="restingHR">FC Repouso</Label>
               <Input
@@ -179,8 +305,10 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                 value={restingHR}
                 onChange={(e) => setRestingHR(e.target.value)}
                 className="bg-background border-border"
+                disabled={isStudentMode}
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="sleepHR">FC Média Sono</Label>
               <Input
@@ -190,17 +318,19 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                 value={sleepHR}
                 onChange={(e) => setSleepHR(e.target.value)}
                 className="bg-background border-border"
+                disabled={isStudentMode}
               />
             </div>
           </div>
 
           {/* Sono */}
           <div className="space-y-4">
-            <h3 className="text-sm font-medium text-white flex items-center gap-2">
-              <Moon className="w-4 h-4 text-blue-400" />
+            <h3 className="flex items-center gap-2 text-sm font-medium text-white">
+              <Moon className="h-4 w-4 text-blue-400" />
               Sono
             </h3>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
               <div className="space-y-2">
                 <Label htmlFor="sleepTotal">Total (hh:mm)</Label>
                 <Input
@@ -209,11 +339,11 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                   value={sleepTotal}
                   onChange={(e) => setSleepTotal(e.target.value)}
                   className="bg-background border-border"
+                  disabled={isStudentMode}
                 />
-                <p className="text-xs text-muted-foreground">
-                  = {sleepTotalHours.toFixed(2)}h
-                </p>
+                <p className="text-xs text-muted-foreground">= {sleepTotalHours.toFixed(2)}h</p>
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="sleepREM">REM (min)</Label>
                 <Input
@@ -223,8 +353,10 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                   value={sleepREM}
                   onChange={(e) => setSleepREM(e.target.value)}
                   className="bg-background border-border"
+                  disabled={isStudentMode}
                 />
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="sleepLight">Leve (min)</Label>
                 <Input
@@ -234,8 +366,10 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                   value={sleepLight}
                   onChange={(e) => setSleepLight(e.target.value)}
                   className="bg-background border-border"
+                  disabled={isStudentMode}
                 />
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="sleepDeep">Profundo (min)</Label>
                 <Input
@@ -245,8 +379,10 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                   value={sleepDeep}
                   onChange={(e) => setSleepDeep(e.target.value)}
                   className="bg-background border-border"
+                  disabled={isStudentMode}
                 />
               </div>
+
               <div className="space-y-2">
                 <Label htmlFor="awakeTime">Acordado (min)</Label>
                 <Input
@@ -256,13 +392,14 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                   value={awakeTime}
                   onChange={(e) => setAwakeTime(e.target.value)}
                   className="bg-background border-border"
+                  disabled={isStudentMode}
                 />
               </div>
             </div>
           </div>
 
           {/* Outros indicadores */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="spo2">SpO2 Média (%)</Label>
               <Input
@@ -272,8 +409,10 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                 value={spo2}
                 onChange={(e) => setSpo2(e.target.value)}
                 className="bg-background border-border"
+                disabled={isStudentMode}
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="respiratoryRate">Freq. Respiratória (rpm)</Label>
               <Input
@@ -283,8 +422,10 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                 value={respiratoryRate}
                 onChange={(e) => setRespiratoryRate(e.target.value)}
                 className="bg-background border-border"
+                disabled={isStudentMode}
               />
             </div>
+
             <div className="space-y-2">
               <Label>Cansaço (1-10): {fatigue}</Label>
               <Slider
@@ -293,6 +434,7 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
                 min={1}
                 max={10}
                 step={1}
+                disabled={isStudentMode}
               />
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>Descansado</span>
@@ -310,18 +452,101 @@ export function PhysiologicalControl({ onSave, physioData }: PhysiologicalContro
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="bg-background border-border"
+              disabled={isStudentMode}
             />
           </div>
 
           {/* Botão salvar */}
           <div className="flex justify-end">
-            <Button onClick={handleSubmit} size="lg" className="gap-2">
-              <Save className="w-5 h-5" />
+            <Button
+              onClick={handleSubmit}
+              size="lg"
+              className="gap-2"
+              disabled={isStudentMode}
+            >
+              <Save className="h-5 w-5" />
               Salvar Registro
             </Button>
           </div>
         </CardContent>
       </Card>
+
+      {/* Histórico */}
+      <Card className="bg-card border-border">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base text-white">
+            <History className="h-4 w-4 text-primary" />
+            Histórico Fisiológico
+          </CardTitle>
+
+          <Button variant="outline" size="sm" onClick={loadHistory}>
+            Atualizar
+          </Button>
+        </CardHeader>
+
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">Data</TableHead>
+                  <TableHead className="text-muted-foreground">Peso</TableHead>
+                  <TableHead className="text-muted-foreground">FC Repouso</TableHead>
+                  <TableHead className="text-muted-foreground">Sono</TableHead>
+                  <TableHead className="text-muted-foreground">SpO2</TableHead>
+                  <TableHead className="text-muted-foreground">Cansaço</TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                {history.map((h) => (
+                  <TableRow key={h.id} className="border-border">
+                    <TableCell className="text-white">
+                      {format(new Date(h.date), 'dd/MM/yyyy')}
+                    </TableCell>
+                    <TableCell className="text-white">
+                      {h.weight !== undefined ? `${h.weight.toFixed(1)} kg` : '-'}
+                    </TableCell>
+                    <TableCell className="text-white">{h.restingHeartRate ?? '-'}</TableCell>
+                    <TableCell className="text-white">
+                      {h.sleepTotalHours !== undefined ? (
+                        <span>
+                          {h.sleepTotalHours.toFixed(1)}h{' '}
+                          <span className="text-muted-foreground">({h.sleepTotal})</span>
+                        </span>
+                      ) : (
+                        '-'
+                      )}
+                    </TableCell>
+                    <TableCell className="text-white">{h.spo2 ?? '-'}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="text-xs">
+                        {h.fatigue ?? 5}/10
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+
+                {!historyLoading && history.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      Nenhum registro fisiológico ainda
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {historyLoading && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      Carregando histórico...
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
-  );
+  )
 }

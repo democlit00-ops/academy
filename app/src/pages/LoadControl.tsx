@@ -1,21 +1,26 @@
-import { useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, Minus, ArrowUp, ArrowDown } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { TrendingUp, TrendingDown, Minus, ArrowUp, ArrowDown, User } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { LineChart, BarChart } from '@/components/charts';
-import type { WorkoutSession, LoadProgressionStatus } from '@/types';
+import type { WorkoutSession, LoadProgressionStatus, WeekDay } from '@/types';
 import { EXERCISE_DEFINITIONS } from '@/data/exercises';
-import { 
-  calculateExerciseProgress, 
+import {
+  calculateExerciseProgress,
   determineLoadProgression,
-  formatWeight 
+  formatWeight
 } from '@/lib/calculations';
 import { format, subDays } from 'date-fns';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
 
 interface LoadControlProps {
   workouts: WorkoutSession[];
+  selectedUserId?: string | null;
+  selectedUserLabel?: string | null;
 }
 
 interface LoadAnalysisItem {
@@ -29,26 +34,106 @@ interface LoadAnalysisItem {
   weightDiff: number;
 }
 
-export function LoadControl({ workouts }: LoadControlProps) {
+type DbWorkoutRow = {
+  id: string;
+  user_id: string;
+  session_date: string;
+  weekday: number | null;
+  total_volume: number | null;
+  exercises: any[] | null;
+  created_at: string | null;
+};
+
+function safeNumber(v: any): number {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = typeof v === 'number' ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function weekdayNumberToLabel(weekday?: number | null): WeekDay {
+  const map: Record<number, WeekDay> = {
+    1: 'Segunda',
+    2: 'Terça',
+    3: 'Quarta',
+    4: 'Quinta',
+    5: 'Sexta',
+    6: 'Sábado',
+    7: 'Domingo',
+  };
+  return map[weekday ?? 1] ?? 'Segunda';
+}
+
+export function LoadControl({
+  workouts,
+  selectedUserId,
+  selectedUserLabel,
+}: LoadControlProps) {
+  const { user } = useAuth();
+
+  const effectiveUserId = selectedUserId || user?.id || null;
+  const isStudentMode = !!selectedUserId;
+
   const [selectedExercise, setSelectedExercise] = useState<string>('all');
+  const [dbWorkouts, setDbWorkouts] = useState<WorkoutSession[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  // Progresso de todos os exercícios
+  useEffect(() => {
+    const loadStudentWorkouts = async () => {
+      if (!effectiveUserId) return;
+
+      if (!isStudentMode) {
+        setDbWorkouts([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('workout_sessions')
+          .select('id,user_id,session_date,weekday,total_volume,exercises,created_at')
+          .eq('user_id', effectiveUserId)
+          .order('session_date', { ascending: true });
+
+        if (error) throw error;
+
+        const mapped: WorkoutSession[] = ((data ?? []) as DbWorkoutRow[]).map((row) => ({
+          id: row.id,
+          date: row.session_date,
+          weekDay: weekdayNumberToLabel(row.weekday),
+          exercises: Array.isArray(row.exercises) ? row.exercises : [],
+          totalVolume: safeNumber(row.total_volume),
+          duration: undefined,
+          createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+        }));
+
+        setDbWorkouts(mapped);
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Erro ao carregar cargas do aluno.');
+        setDbWorkouts([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadStudentWorkouts();
+  }, [effectiveUserId, isStudentMode]);
+
+  const effectiveWorkouts = isStudentMode ? dbWorkouts : workouts;
+
   const exerciseProgress = useMemo(() => {
-    return calculateExerciseProgress(workouts);
-  }, [workouts]);
+    return calculateExerciseProgress(effectiveWorkouts);
+  }, [effectiveWorkouts]);
 
-  // Exercícios filtrados
   const filteredProgress = useMemo(() => {
     if (selectedExercise === 'all') return exerciseProgress;
-    return exerciseProgress.filter(p => p.exerciseId === selectedExercise);
+    return exerciseProgress.filter((p) => p.exerciseId === selectedExercise);
   }, [exerciseProgress, selectedExercise]);
 
-  // Dados para o gráfico de evolução
   const progressChartData = useMemo(() => {
     if (filteredProgress.length === 0) return [];
-    
+
     const exercise = filteredProgress[0];
-    return exercise.history.map(h => ({
+    return exercise.history.map((h) => ({
       date: h.date,
       label: format(new Date(h.date), 'dd/MM'),
       maxWeight: h.maxWeight,
@@ -57,9 +142,8 @@ export function LoadControl({ workouts }: LoadControlProps) {
     }));
   }, [filteredProgress]);
 
-  // Análise de progressão para cada exercício
   const loadAnalysis = useMemo((): LoadAnalysisItem[] => {
-    return exerciseProgress.map(progress => {
+    return exerciseProgress.map((progress) => {
       const history = progress.history;
       if (history.length < 2) {
         return {
@@ -76,17 +160,14 @@ export function LoadControl({ workouts }: LoadControlProps) {
 
       const lastSession = history[history.length - 1];
       const prevSession = history[history.length - 2];
-      
-      // Calcular tendência
       const weightDiff = lastSession.maxWeight - prevSession.maxWeight;
-      
-      // Determinar status (simulado - em produção viria do registro de RPE)
+
       const simulatedRPE = lastSession.maxWeight > prevSession.maxWeight ? 8 : 6;
       const status = determineLoadProgression(simulatedRPE, 0);
-      
+
       let suggestion = '';
       if (status === 'Subir carga') {
-        const exercise = EXERCISE_DEFINITIONS.find(e => e.id === progress.exerciseId);
+        const exercise = EXERCISE_DEFINITIONS.find((e) => e.id === progress.exerciseId);
         const increment = exercise?.loadIncrement || 2.5;
         suggestion = `Aumente ${increment}kg na próxima sessão`;
       } else if (status === 'Manter carga') {
@@ -108,21 +189,23 @@ export function LoadControl({ workouts }: LoadControlProps) {
     });
   }, [exerciseProgress]);
 
-  // Volume por exercício (últimos 30 dias)
   const volumeData = useMemo(() => {
     const thirtyDaysAgo = subDays(new Date(), 30);
-    
-    return exerciseProgress.map(ex => {
-      const recentVolume = ex.history
-        .filter(h => new Date(h.date) >= thirtyDaysAgo)
-        .reduce((sum, h) => sum + h.totalVolume, 0);
-      
-      return {
-        name: ex.exerciseName,
-        volume: recentVolume,
-        muscleGroup: ex.muscleGroup,
-      };
-    }).sort((a, b) => b.volume - a.volume).slice(0, 10);
+
+    return exerciseProgress
+      .map((ex) => {
+        const recentVolume = ex.history
+          .filter((h) => new Date(h.date) >= thirtyDaysAgo)
+          .reduce((sum, h) => sum + h.totalVolume, 0);
+
+        return {
+          name: ex.exerciseName,
+          volume: recentVolume,
+          muscleGroup: ex.muscleGroup,
+        };
+      })
+      .sort((a, b) => b.volume - a.volume)
+      .slice(0, 10);
   }, [exerciseProgress]);
 
   const getStatusIcon = (status: LoadProgressionStatus) => {
@@ -155,15 +238,30 @@ export function LoadControl({ workouts }: LoadControlProps) {
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Controle de Cargas</h1>
-          <p className="text-muted-foreground">Acompanhe sua progressão de força</p>
+          <p className="text-muted-foreground">
+            {isStudentMode
+              ? 'Acompanhe a progressão de força do aluno selecionado'
+              : 'Acompanhe sua progressão de força'}
+          </p>
+
+          {isStudentMode && (
+            <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary">
+              <User className="h-4 w-4" />
+              <span>
+                Visualizando dados de: <strong>{selectedUserLabel || 'Aluno selecionado'}</strong>
+              </span>
+            </div>
+          )}
+
+          {isStudentMode && loading && (
+            <p className="mt-2 text-sm text-muted-foreground">Carregando dados do aluno...</p>
+          )}
         </div>
       </div>
 
-      {/* Seletor de exercício */}
       <Card className="bg-card border-border">
         <CardContent className="pt-6">
           <div className="space-y-2">
@@ -174,7 +272,7 @@ export function LoadControl({ workouts }: LoadControlProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os exercícios</SelectItem>
-                {exerciseProgress.map(ex => (
+                {exerciseProgress.map((ex) => (
                   <SelectItem key={ex.exerciseId} value={ex.exerciseId}>
                     {ex.exerciseName}
                   </SelectItem>
@@ -185,9 +283,7 @@ export function LoadControl({ workouts }: LoadControlProps) {
         </CardContent>
       </Card>
 
-      {/* Gráficos */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Evolução de carga */}
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-white text-base">
@@ -215,7 +311,6 @@ export function LoadControl({ workouts }: LoadControlProps) {
           </CardContent>
         </Card>
 
-        {/* Volume por exercício */}
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-white text-base">
@@ -235,7 +330,6 @@ export function LoadControl({ workouts }: LoadControlProps) {
         </Card>
       </div>
 
-      {/* Tabela de análise */}
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle className="text-white text-base flex items-center gap-2">
@@ -289,6 +383,22 @@ export function LoadControl({ workouts }: LoadControlProps) {
                     </TableCell>
                   </TableRow>
                 ))}
+
+                {!loading && loadAnalysis.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      Nenhum treino encontrado para análise
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {loading && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      Carregando análise...
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </div>

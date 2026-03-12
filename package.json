@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "@netlify/functions": "^5.1.2",
+    "dotenv": "^17.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "netlify-cli": "^24.0.1"
+  }
+}
