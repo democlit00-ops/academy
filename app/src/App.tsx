@@ -36,7 +36,6 @@ import type {
   CardioSession,
   PhysiologicalData,
   UserSettings,
-  WorkoutSplit
 } from '@/types';
 import { calculateRecoveryScore } from '@/lib/calculations';
 import './App.css';
@@ -239,27 +238,8 @@ function MainApp() {
     toast.success('Configurações salvas!');
   };
 
-  const handleSaveSplit = (split: WorkoutSplit) => {
-    setSplits((prev: WorkoutSplit[]) => {
-      const exists = prev.find((s) => s.id === split.id);
-      if (exists) {
-        return prev.map((s) => (s.id === split.id ? split : s));
-      }
-      return [...prev, split];
-    });
-  };
-
-  const handleDeleteSplit = (id: string) => {
-    setSplits((prev: WorkoutSplit[]) => prev.filter((s) => s.id !== id));
-    if (activeSplitId === id) {
-      setActiveSplitId('');
-    }
-    toast.success('Split removido!');
-  };
-
-  const handleSetActiveSplit = (id: string) => {
-    setActiveSplitId(id);
-  };
+  
+  
 
   const handleClearData = () => {
     setWorkoutSessions([]);
