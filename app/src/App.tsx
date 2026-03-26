@@ -1,3 +1,4 @@
+//academy\app\src\App.tsx
 import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from "./contexts/AuthContext";
 import AuthPage from "./pages/Auth";
