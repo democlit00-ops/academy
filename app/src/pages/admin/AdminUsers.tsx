@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Users, Search, Shield, GraduationCap, User as UserIcon, Link2, Unlink, List, WalletCards, Save } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -79,8 +79,9 @@ export default function AdminUsers() {
 
       if (error) throw error
       setProfiles((data ?? []) as ProfileRow[])
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao carregar usuários')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao carregar usuários'
+      toast.error(message)
       setProfiles([])
     } finally {
       setLoading(false)
@@ -128,15 +129,16 @@ export default function AdminUsers() {
       }))
 
       setLinks(view)
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao carregar vínculos')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao carregar vínculos'
+      toast.error(message)
       setLinks([])
     } finally {
       setLinksLoading(false)
     }
   }
 
-  const loadCoachLimits = async (coachProfiles?: ProfileRow[]) => {
+  const loadCoachLimits = useCallback(async (coachProfiles?: ProfileRow[]) => {
     const baseProfiles = coachProfiles ?? profiles
     const coachIds = baseProfiles
       .filter((p) => (p.role ?? 'user') === 'coach' || (p.role ?? 'user') === 'admin')
@@ -152,14 +154,15 @@ export default function AdminUsers() {
           return acc
         }, {})
       )
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao carregar limites dos coaches')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao carregar limites dos coaches'
+      toast.error(message)
       setCoachSummaries([])
       setDraftLimits({})
     } finally {
       setLimitsLoading(false)
     }
-  }
+  }, [profiles])
 
   useEffect(() => {
     const run = async () => {
@@ -172,7 +175,7 @@ export default function AdminUsers() {
   useEffect(() => {
     if (profiles.length === 0) return
     void loadCoachLimits(profiles)
-  }, [profiles])
+  }, [profiles, loadCoachLimits])
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase()
@@ -197,8 +200,9 @@ export default function AdminUsers() {
       if (error) throw error
       toast.success(`Role atualizada para ${role} ✅`)
       setProfiles((prev) => prev.map((p) => (p.id === id ? { ...p, role } : p)))
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao atualizar role')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao atualizar role'
+      toast.error(message)
     }
   }
 
@@ -228,8 +232,9 @@ export default function AdminUsers() {
 
       toast.success('Limite do coach atualizado ✅')
       await loadCoachLimits()
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao salvar limite do coach')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao salvar limite do coach'
+      toast.error(message)
     } finally {
       setSavingLimitCoachId(null)
     }
@@ -268,8 +273,9 @@ export default function AdminUsers() {
       toast.success('Aluno vinculado ✅')
       await loadLinks()
       await loadCoachLimits()
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao vincular aluno')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao vincular aluno'
+      toast.error(message)
     }
   }
 
@@ -292,8 +298,9 @@ export default function AdminUsers() {
       toast.success('Vínculo removido ✅')
       await loadLinks()
       await loadCoachLimits()
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao remover vínculo')
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao remover vínculo'
+      toast.error(message)
     }
   }
 

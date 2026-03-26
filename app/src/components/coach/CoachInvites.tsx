@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Copy, Link2, Mail, RefreshCw, Trash2, UserPlus } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -62,35 +62,36 @@ export function CoachInvites() {
     [invites]
   )
 
-  const load = async () => {
-    if (!user) return
+  const load = useCallback(async () => {
+  if (!user) return
 
-    setLoading(true)
-    try {
-      const [summary, invitesResult] = await Promise.all([
-        getCoachLimitSummary(user.id),
-        supabase
-          .from('coach_invites')
-          .select('id,coach_id,code,email,status,expires_at,used_by_user_id,used_at,created_at')
-          .eq('coach_id', user.id)
-          .order('created_at', { ascending: false }),
-      ])
+  setLoading(true)
+  try {
+    const [summary, invitesResult] = await Promise.all([
+      getCoachLimitSummary(user.id),
+      supabase
+        .from('coach_invites')
+        .select('id,coach_id,code,email,status,expires_at,used_by_user_id,used_at,created_at')
+        .eq('coach_id', user.id)
+        .order('created_at', { ascending: false }),
+    ])
 
-      if (invitesResult.error) throw invitesResult.error
+    if (invitesResult.error) throw invitesResult.error
 
-      setAvailableStudents(summary.availableStudents)
-      setInvites((invitesResult.data ?? []) as CoachInviteRow[])
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao carregar convites.')
-      setInvites([])
-    } finally {
-      setLoading(false)
-    }
+    setAvailableStudents(summary.availableStudents)
+    setInvites((invitesResult.data ?? []) as CoachInviteRow[])
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Erro ao carregar convites.'
+    toast.error(message)
+    setInvites([])
+  } finally {
+    setLoading(false)
   }
+}, [user])
 
   useEffect(() => {
-    void load()
-  }, [user?.id])
+  void load()
+}, [load])
 
   const handleCreateInvite = async () => {
     if (!user) return
@@ -117,9 +118,10 @@ export function CoachInvites() {
       toast.success('Convite criado ✅')
       setEmail('')
       await load()
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao criar convite.')
-    } finally {
+    } catch (e: unknown) {
+  const message = e instanceof Error ? e.message : 'Erro ao criar convite.'
+  toast.error(message)
+} finally {
       setCreating(false)
     }
   }
@@ -137,9 +139,10 @@ export function CoachInvites() {
 
       toast.success('Convite cancelado ✅')
       await load()
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao cancelar convite.')
-    } finally {
+    } catch (e: unknown) {
+  const message = e instanceof Error ? e.message : 'Erro ao cancelar convite.'
+  toast.error(message)
+} finally {
       setCancellingId(null)
     }
   }

@@ -16,6 +16,7 @@ import { format, subDays } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { parseLocalDate, formatLocalDate } from '@/lib/date'
 
 interface LoadControlProps {
   workouts: WorkoutSession[];
@@ -62,6 +63,8 @@ function weekdayNumberToLabel(weekday?: number | null): WeekDay {
   };
   return map[weekday ?? 1] ?? 'Segunda';
 }
+
+
 
 export function LoadControl({
   workouts,
@@ -135,7 +138,7 @@ export function LoadControl({
     const exercise = filteredProgress[0];
     return exercise.history.map((h) => ({
       date: h.date,
-      label: format(new Date(h.date), 'dd/MM'),
+      label: formatLocalDate(h.date, (d) => format(d, 'dd/MM')),
       maxWeight: h.maxWeight,
       volume: h.totalVolume,
       avgWeight: h.avgWeight,
@@ -195,7 +198,10 @@ export function LoadControl({
     return exerciseProgress
       .map((ex) => {
         const recentVolume = ex.history
-          .filter((h) => new Date(h.date) >= thirtyDaysAgo)
+          .filter((h) => {
+            const historyDate = parseLocalDate(h.date);
+            return historyDate ? historyDate >= thirtyDaysAgo : false;
+          })
           .reduce((sum, h) => sum + h.totalVolume, 0);
 
         return {
@@ -283,7 +289,7 @@ export function LoadControl({
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-white text-base">

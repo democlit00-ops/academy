@@ -9,6 +9,5 @@ export { WorkoutSplitPlanner } from './WorkoutSplit';
 export { OneRepMax } from './OneRepMax';
 export { InjuryTracker } from './InjuryTracker';
 export { ShareWorkout } from './ShareWorkout';
-export { Wearables } from './Wearables';
 export { WorkoutPrograms } from './WorkoutPrograms';
 export { Settings } from './Settings';

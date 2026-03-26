@@ -45,6 +45,18 @@ function weekdayNumberToLabel(weekday?: number | null): WeekDay {
   return map[weekday ?? 1] ?? 'Segunda';
 }
 
+function parseLocalDate(date: string | null | undefined): Date | null {
+  if (!date) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const parsed = new Date(`${date}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(date);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export function MuscleAnalysis({
   workouts,
   selectedUserId,
@@ -113,7 +125,8 @@ export function MuscleAnalysis({
     });
 
     effectiveWorkouts.forEach((workout) => {
-      const workoutDate = new Date(workout.date);
+      const workoutDate = parseLocalDate(workout.date);
+      if (!workoutDate) return;
 
       workout.exercises.forEach((ex) => {
         const volume = calculateExerciseVolume(ex);

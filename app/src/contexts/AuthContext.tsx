@@ -10,6 +10,11 @@ type Profile = {
   email: string | null
   full_name: string | null
   role: UserRole
+  age?: number | null
+  weight?: number | null
+  height?: number | null
+  fitness_goal?: string | null
+  preferred_weight_unit?: 'kg' | 'lbs' | null
   created_at?: string
   updated_at?: string
 }
@@ -27,7 +32,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 async function getOrCreateProfile(user: User): Promise<Profile> {
   const { data: existing, error: selectErr } = await supabase
     .from('profiles')
-    .select('id,email,full_name,role,created_at,updated_at')
+    .select('id,email,full_name,role,age,weight,height,fitness_goal,preferred_weight_unit,created_at,updated_at')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -47,7 +52,7 @@ async function getOrCreateProfile(user: User): Promise<Profile> {
   const { data: inserted, error: insertErr } = await supabase
     .from('profiles')
     .insert(payload)
-    .select('id,email,full_name,role,created_at,updated_at')
+    .select('id,email,full_name,role,age,weight,height,fitness_goal,preferred_weight_unit,created_at,updated_at')
     .single()
 
   if (insertErr) throw insertErr

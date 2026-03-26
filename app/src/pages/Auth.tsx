@@ -9,10 +9,6 @@ type InvitePreview = {
   email: string | null
   status: 'pending' | 'used' | 'cancelled' | 'expired'
   expires_at: string | null
-  coach?: {
-    full_name: string | null
-    email: string | null
-  } | null
 }
 
 function isInviteExpired(expiresAt: string | null) {
@@ -34,7 +30,6 @@ export default function AuthPage() {
   const [inviteLoading, setInviteLoading] = useState(false)
   const [invite, setInvite] = useState<InvitePreview | null>(null)
   const [inviteMessage, setInviteMessage] = useState<string | null>(null)
-  const [inviteAccepted, setInviteAccepted] = useState(false)
   const [resolvedInviteCode, setResolvedInviteCode] = useState(inviteCodeFromUrl)
 
   const canSubmit = useMemo(() => email.trim().length > 3, [email])
@@ -81,24 +76,13 @@ export default function AuthPage() {
       try {
         const { data, error } = await supabase
           .from('coach_invites')
-          .select(`
-            id,
-            coach_id,
-            code,
-            email,
-            status,
-            expires_at,
-            coach:coach_id (
-              full_name,
-              email
-            )
-          `)
+          .select('id, coach_id, code, email, status, expires_at')
           .eq('code', resolvedInviteCode)
           .maybeSingle()
 
         if (error) throw error
 
-        const parsed = (data ?? null) as unknown as InvitePreview | null
+        const parsed = (data ?? null) as InvitePreview | null
         setInvite(parsed)
 
         if (!parsed) {
@@ -129,53 +113,6 @@ export default function AuthPage() {
 
     void loadInvite()
   }, [resolvedInviteCode, email])
-
-  useEffect(() => {
-    const consumeInviteIfNeeded = async () => {
-      if (!resolvedInviteCode || inviteAccepted) return
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) return
-
-      const metadataInviteCode = String(user.user_metadata?.invite_code ?? '')
-        .trim()
-        .toUpperCase()
-
-      const effectiveInviteCode = resolvedInviteCode || metadataInviteCode
-      if (!effectiveInviteCode) return
-
-      try {
-        const response = await fetch('/.netlify/functions/accept-coach-invite', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            inviteCode: effectiveInviteCode,
-            userId: user.id,
-            email: user.email ?? email ?? null,
-          }),
-        })
-
-        const payload = await response.json().catch(() => ({}))
-
-        if (!response.ok) {
-          setMessage(payload?.error ?? 'Não foi possível concluir o convite.')
-          return
-        }
-
-        setInviteAccepted(true)
-        setMessage('Convite aceito com sucesso! Seu vínculo com o professor foi criado.')
-      } catch (e: any) {
-        setMessage(e?.message ?? 'Erro ao concluir o convite.')
-      }
-    }
-
-    void consumeInviteIfNeeded()
-  }, [resolvedInviteCode, inviteAccepted, email])
 
   async function handleSignIn() {
     setLoading(true)
@@ -225,6 +162,30 @@ export default function AuthPage() {
       setMessage('Conta criada com sucesso. Verifique seu email e clique no link de confirmação para ativar o acesso. Depois do primeiro login, o sistema concluirá automaticamente o vínculo com o professor.')
     } catch (e: any) {
       setMessage(e?.message ?? 'Erro ao cadastrar com convite')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleForgotPassword() {
+    if (!email.trim()) {
+      setMessage('Informe seu email para receber o link de redefinição.')
+      return
+    }
+
+    setLoading(true)
+    setMessage(null)
+    try {
+      const redirectTo = `${window.location.origin}/reset-password`
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo,
+      })
+
+      if (error) throw error
+
+      setMessage('Enviamos um link de recuperação para seu email. Abra a mensagem e siga o processo para redefinir sua senha.')
+    } catch (e: any) {
+      setMessage(e?.message ?? 'Erro ao enviar email de recuperação.')
     } finally {
       setLoading(false)
     }
@@ -307,13 +268,24 @@ export default function AuthPage() {
 
         <div className="mt-7 grid grid-cols-1 gap-3">
           {!inviteMode && (
-            <button
-              disabled={!canSubmit || loading || password.length < 6}
-              onClick={handleSignIn}
-              className="rounded-2xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 px-4 py-3 font-medium transition-colors"
-            >
-              Entrar (Email + Senha)
-            </button>
+            <>
+              <button
+                disabled={!canSubmit || loading || password.length < 6}
+                onClick={handleSignIn}
+                className="rounded-2xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 px-4 py-3 font-medium transition-colors"
+              >
+                Entrar (Email + Senha)
+              </button>
+
+              <button
+                type="button"
+                disabled={!canSubmit || loading}
+                onClick={handleForgotPassword}
+                className="text-sm text-cyan-300 hover:text-cyan-200 transition-colors"
+              >
+                Esqueci minha senha
+              </button>
+            </>
           )}
 
           {inviteMode && (

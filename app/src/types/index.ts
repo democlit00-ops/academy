@@ -3,7 +3,7 @@
 // ============================================
 
 // Grupos musculares
-export type MuscleGroup = 
+export type MuscleGroup =
   | 'Peito'
   | 'Costas'
   | 'Ombro'
@@ -16,7 +16,7 @@ export type MuscleGroup =
   | 'Pernas';
 
 // Tipos de cardio
-export type CardioType = 
+export type CardioType =
   | 'Esteira'
   | 'Bike'
   | 'Caminhada'
@@ -26,7 +26,7 @@ export type CardioType =
   | 'Outro';
 
 // Zonas cardíacas
-export type HeartRateZone = 
+export type HeartRateZone =
   | 'Zona 1'
   | 'Zona 2'
   | 'Zona 3'
@@ -34,7 +34,7 @@ export type HeartRateZone =
   | 'Zona 5';
 
 // Dias da semana
-export type WeekDay = 
+export type WeekDay =
   | 'Segunda'
   | 'Terça'
   | 'Quarta'
@@ -44,7 +44,7 @@ export type WeekDay =
   | 'Domingo';
 
 // Status de progressão de carga
-export type LoadProgressionStatus = 
+export type LoadProgressionStatus =
   | 'Subir carga'
   | 'Manter carga'
   | 'Reduzir carga';
@@ -87,7 +87,7 @@ export interface WorkoutSession {
   exercises: WorkoutExercise[];
   totalVolume: number;
   duration?: number; // em minutos
-  createdAt: number;
+  createdAt?: number | string;
 }
 
 // ============================================
@@ -174,34 +174,37 @@ export interface WeeklyStats {
 }
 
 // ============================================
-// SPLIT DE TREINO SEMANAL
+// SPLIT DE TREINO SEMANAL (LEGADO / EM REVISÃO)
 // ============================================
+// Observação:
+// O sistema atual de split/programa já usa banco de dados com plans, plan_days,
+// plan_items, plan_students e user_active_plan.
+// Estes tipos podem ser removidos ou reduzidos depois da limpeza completa.
 export interface SplitDay {
   day: WeekDay;
   muscleGroups: MuscleGroup[];
-  focus: string; // ex: "Peito e Tríceps", "Costas e Bíceps"
+  focus: string;
   isRestDay: boolean;
-  exercises?: string[]; // IDs dos exercícios sugeridos
+  exercises?: string[];
 }
 
 export interface WorkoutSplit {
   id: string;
-  name: string; // ex: "Push/Pull/Legs", "ABC", "Full Body"
+  name: string;
   description?: string;
   days: SplitDay[];
   createdAt: number;
   isActive: boolean;
 }
 
-// Templates pré-definidos de splits
-export type SplitTemplate = 
-  | 'ABC'           // A=Peito/Tríceps, B=Costas/Bíceps, C=Pernas/Ombro
-  | 'AB'            // A=Superior, B=Inferior
-  | 'ABCDE'         // Um grupo por dia
-  | 'PPL'           // Push/Pull/Legs
-  | 'FULL_BODY'     // Full body 3x por semana
-  | 'UPPER_LOWER'   // Upper/Lower alternado
-  | 'CUSTOM';       // Personalizado
+export type SplitTemplate =
+  | 'ABC'
+  | 'AB'
+  | 'ABCDE'
+  | 'PPL'
+  | 'FULL_BODY'
+  | 'UPPER_LOWER'
+  | 'CUSTOM';
 
 // ============================================
 // CONFIGURAÇÕES DO USUÁRIO
@@ -211,8 +214,6 @@ export interface UserSettings {
   age?: number;
   weight?: number;
   height?: number;
-  maxHeartRate?: number;
-  restingHeartRate?: number;
   fitnessGoal?: 'Hipertrofia' | 'Força' | 'Resistência' | 'Emagrecimento' | 'Geral';
   preferredUnits: {
     weight: 'kg' | 'lbs';
@@ -222,18 +223,13 @@ export interface UserSettings {
 }
 
 // ============================================
-// ESTADO GLOBAL DA APLICAÇÃO
+// ESTADO GLOBAL DA APLICAÇÃO (LEGADO / EM REVISÃO)
 // ============================================
 export interface AppState {
-  // Dados brutos
   workoutSessions: WorkoutSession[];
   cardioSessions: CardioSession[];
   physiologicalData: PhysiologicalData[];
-  
-  // Configurações
   settings: UserSettings;
-  
-  // Dados derivados (calculados)
   exerciseProgress: ExerciseProgress[];
   muscleVolumeData: MuscleVolumeData[];
   recoveryScores: RecoveryScore[];
@@ -247,7 +243,7 @@ export interface ChartDataPoint {
   date: string;
   label: string;
   value: number;
-  [key: string]: any;
+  [key: string]: string | number | undefined;
 }
 
 export interface RadarDataPoint {

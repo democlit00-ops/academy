@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Heart, Save, Flame, History, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,12 +7,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import { CARDIO_TYPES, HEART_RATE_ZONES } from '@/data/exercises'
 import type { CardioSession, CardioType, HeartRateZone } from '@/types'
 import { format } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { getTodayLocalDateString, formatLocalDate } from '@/lib/date'
 
 interface CardioFormProps {
   onSave: (cardio: CardioSession) => void
@@ -35,17 +37,43 @@ function safeNumber(v: any): number | undefined {
   return Number.isFinite(n) ? n : undefined
 }
 
+function formatDateSafe(date: string) {
+  return formatLocalDate(date, (d) => format(d, 'dd/MM/yyyy'))
+}
+
+function calculateEstimatedMaxHeartRate(age?: number): number | undefined {
+  if (!age || age <= 0) return undefined
+  return Math.round(220 - age)
+}
+
+function calculateHeartRateZone(
+  avgHeartRate?: number,
+  maxHeartRate?: number,
+  estimatedMaxHeartRate?: number
+): HeartRateZone {
+  const baseMaxHr = maxHeartRate || estimatedMaxHeartRate
+  if (!avgHeartRate || !baseMaxHr || baseMaxHr <= 0) return 'Zona 2'
+
+  const intensity = avgHeartRate / baseMaxHr
+
+  if (intensity < 0.6) return 'Zona 1'
+  if (intensity < 0.7) return 'Zona 2'
+  if (intensity < 0.8) return 'Zona 3'
+  if (intensity < 0.9) return 'Zona 4'
+  return 'Zona 5'
+}
+
 export function CardioForm({
   onSave,
   selectedUserId,
   selectedUserLabel,
 }: CardioFormProps) {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
 
   const effectiveUserId = selectedUserId || user?.id || null
   const isStudentMode = !!selectedUserId
 
-  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [date, setDate] = useState(getTodayLocalDateString())
   const [type, setType] = useState<CardioType>('Esteira')
   const [duration, setDuration] = useState('')
   const [distance, setDistance] = useState('')
@@ -54,20 +82,34 @@ export function CardioForm({
   const [maxHeartRate, setMaxHeartRate] = useState('')
   const [calories, setCalories] = useState('')
   const [steps, setSteps] = useState('')
-  const [heartRateZone, setHeartRateZone] = useState<HeartRateZone>('Zona 2')
   const [notes, setNotes] = useState('')
 
-  // Histórico (Supabase)
   const [historyLoading, setHistoryLoading] = useState(true)
   const [history, setHistory] = useState<CardioSession[]>([])
 
+  const estimatedMaxHeartRate = useMemo(() => {
+    const age = typeof profile?.age === 'number' ? profile.age : undefined
+    return calculateEstimatedMaxHeartRate(age)
+  }, [profile?.age])
+
+  const computedHeartRateZone = useMemo(() => {
+    const avgHr = avgHeartRate ? parseInt(avgHeartRate, 10) : undefined
+    const maxHr = maxHeartRate ? parseInt(maxHeartRate, 10) : undefined
+
+    return calculateHeartRateZone(avgHr, maxHr, estimatedMaxHeartRate)
+  }, [avgHeartRate, maxHeartRate, estimatedMaxHeartRate])
+
   const selectedZone = useMemo(
-    () => HEART_RATE_ZONES.find((z) => z.zone === heartRateZone),
-    [heartRateZone]
+    () => HEART_RATE_ZONES.find((z) => z.zone === computedHeartRateZone),
+    [computedHeartRateZone]
   )
 
-  const loadHistory = async () => {
-    if (!effectiveUserId) return
+  const loadHistory = useCallback(async () => {
+    if (!effectiveUserId) {
+      setHistory([])
+      setHistoryLoading(false)
+      return
+    }
 
     setHistoryLoading(true)
     try {
@@ -83,6 +125,15 @@ export function CardioForm({
       const mapped = ((data ?? []) as DbCardioRow[]).map((row) => {
         const d = row.data ?? {}
 
+        const avgHr = safeNumber(d.avgHeartRate)
+        const maxHr = safeNumber(d.maxHeartRate)
+        const zone = (d.heartRateZone ??
+          calculateHeartRateZone(
+            avgHr,
+            maxHr,
+            estimatedMaxHeartRate
+          )) as HeartRateZone
+
         const cardio: CardioSession = {
           id: row.id,
           date: row.session_date,
@@ -90,11 +141,11 @@ export function CardioForm({
           duration: safeNumber(d.duration) ?? 0,
           distance: safeNumber(d.distance),
           avgSpeed: safeNumber(d.avgSpeed),
-          avgHeartRate: safeNumber(d.avgHeartRate),
-          maxHeartRate: safeNumber(d.maxHeartRate),
+          avgHeartRate: avgHr,
+          maxHeartRate: maxHr,
           calories: safeNumber(d.calories),
           steps: safeNumber(d.steps),
-          heartRateZone: (d.heartRateZone ?? 'Zona 2') as HeartRateZone,
+          heartRateZone: zone,
           notes: d.notes ?? undefined,
         }
 
@@ -108,51 +159,14 @@ export function CardioForm({
     } finally {
       setHistoryLoading(false)
     }
-  }
+  }, [effectiveUserId, estimatedMaxHeartRate])
 
   useEffect(() => {
     void loadHistory()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveUserId])
+  }, [loadHistory])
 
-  const handleSubmit = async () => {
-    if (isStudentMode) {
-      toast.error('No Modo Aluno, o cardio está apenas para visualização por enquanto.')
-      return
-    }
-
-    if (!duration) {
-      toast.error('Informe a duração do treino')
-      return
-    }
-
-    const cardio: CardioSession = {
-      id: crypto.randomUUID(),
-      date,
-      type,
-      duration: parseInt(duration),
-      distance: distance ? parseFloat(distance) : undefined,
-      avgSpeed: avgSpeed ? parseFloat(avgSpeed) : undefined,
-      avgHeartRate: avgHeartRate ? parseInt(avgHeartRate) : undefined,
-      maxHeartRate: maxHeartRate ? parseInt(maxHeartRate) : undefined,
-      calories: calories ? parseInt(calories) : undefined,
-      steps: steps ? parseInt(steps) : undefined,
-      heartRateZone,
-      notes: notes || undefined,
-    }
-
-    // 1) salva (App.tsx faz local + Supabase)
-    onSave(cardio)
-
-    // 2) feedback + otimista
-    toast.success('Cardio registrado!')
-    setHistory((prev) => [cardio, ...prev].slice(0, 30))
-
-    // 3) recarrega do servidor
-    void loadHistory()
-
-    // Reset form
-    setDate(format(new Date(), 'yyyy-MM-dd'))
+  const resetForm = () => {
+    setDate(getTodayLocalDateString())
     setType('Esteira')
     setDuration('')
     setDistance('')
@@ -161,13 +175,47 @@ export function CardioForm({
     setMaxHeartRate('')
     setCalories('')
     setSteps('')
-    setHeartRateZone('Zona 2')
     setNotes('')
+  }
+
+  const handleSubmit = () => {
+    if (isStudentMode) {
+      toast.error('No Modo Aluno, o cardio está apenas para visualização por enquanto.')
+      return
+    }
+
+    if (!duration) {
+      toast.error('Informe a duração do treino.')
+      return
+    }
+
+    const avgHr = avgHeartRate ? parseInt(avgHeartRate, 10) : undefined
+    const maxHr = maxHeartRate ? parseInt(maxHeartRate, 10) : undefined
+    const heartRateZone = calculateHeartRateZone(avgHr, maxHr, estimatedMaxHeartRate)
+
+    const cardio: CardioSession = {
+      id: crypto.randomUUID(),
+      date,
+      type,
+      duration: parseInt(duration, 10),
+      distance: distance ? parseFloat(distance) : undefined,
+      avgSpeed: avgSpeed ? parseFloat(avgSpeed) : undefined,
+      avgHeartRate: avgHr,
+      maxHeartRate: maxHr,
+      calories: calories ? parseInt(calories, 10) : undefined,
+      steps: steps ? parseInt(steps, 10) : undefined,
+      heartRateZone,
+      notes: notes || undefined,
+    }
+
+    onSave(cardio)
+    setHistory((prev) => [cardio, ...prev].slice(0, 30))
+    void loadHistory()
+    resetForm()
   }
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Cardio</h1>
@@ -188,11 +236,10 @@ export function CardioForm({
         </div>
       </div>
 
-      {/* Formulário */}
       <Card className="bg-card border-border">
         <CardHeader>
-          <CardTitle className="text-white flex items-center gap-2">
-            <Heart className="w-5 h-5 text-red-500" />
+          <CardTitle className="flex items-center gap-2 text-white">
+            <Heart className="h-5 w-5 text-red-500" />
             Novo Treino Cardio
             {isStudentMode && (
               <Badge variant="secondary" className="ml-2">
@@ -203,8 +250,7 @@ export function CardioForm({
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Data e Tipo */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="date">Data</Label>
               <Input
@@ -238,8 +284,7 @@ export function CardioForm({
             </div>
           </div>
 
-          {/* Métricas principais */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="duration">
                 Duração <span className="text-red-500">*</span>
@@ -297,8 +342,7 @@ export function CardioForm({
             </div>
           </div>
 
-          {/* Frequência cardíaca */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="avgHeartRate">FC Média (bpm)</Label>
               <Input
@@ -339,64 +383,47 @@ export function CardioForm({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="zone">Zona Cardíaca</Label>
-              <Select
-                value={heartRateZone}
-                onValueChange={(v) => setHeartRateZone(v as HeartRateZone)}
-                disabled={isStudentMode}
-              >
-                <SelectTrigger
-                  className="bg-background border-border"
-                  style={{ borderColor: selectedZone?.color }}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {HEART_RATE_ZONES.map((z) => (
-                    <SelectItem key={z.zone} value={z.zone}>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: z.color }} />
-                        {z.zone} - {z.name}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="zone">Zona Cardíaca (automática)</Label>
+              <Input
+                id="zone"
+                value={computedHeartRateZone}
+                readOnly
+                className="bg-background border-border text-white"
+                disabled
+              />
             </div>
           </div>
 
-          {/* Info da zona cardíaca */}
           {selectedZone && (
             <div
-              className="p-3 rounded-lg flex items-center gap-3"
+              className="flex items-center gap-3 rounded-lg p-3"
               style={{ backgroundColor: `${selectedZone.color}15` }}
             >
-              <Flame className="w-5 h-5" style={{ color: selectedZone.color }} />
+              <Flame className="h-5 w-5" style={{ color: selectedZone.color }} />
               <div>
                 <p className="text-sm font-medium" style={{ color: selectedZone.color }}>
                   {selectedZone.zone}: {selectedZone.name}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Intensidade {selectedZone.range} da FC máxima
+                  {estimatedMaxHeartRate ? ` • FC máx estimada: ${estimatedMaxHeartRate} bpm` : ''}
                 </p>
               </div>
             </div>
           )}
 
-          {/* Observações */}
           <div className="space-y-2">
             <Label htmlFor="notes">Observações</Label>
-            <Input
+            <Textarea
               id="notes"
               placeholder="Como foi o treino?"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="bg-background border-border"
+              className="min-h-[90px] bg-background border-border"
               disabled={isStudentMode}
             />
           </div>
 
-          {/* Botão salvar */}
           <div className="flex justify-end">
             <Button
               onClick={handleSubmit}
@@ -404,22 +431,21 @@ export function CardioForm({
               className="gap-2"
               disabled={isStudentMode}
             >
-              <Save className="w-5 h-5" />
+              <Save className="h-5 w-5" />
               Registrar Cardio
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Histórico */}
       <Card className="bg-card border-border">
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-white text-base flex items-center gap-2">
-            <History className="w-4 h-4 text-primary" />
+          <CardTitle className="flex items-center gap-2 text-base text-white">
+            <History className="h-4 w-4 text-primary" />
             Histórico Cardio
           </CardTitle>
-          <Button variant="outline" size="sm" onClick={loadHistory}>
-            Atualizar
+          <Button variant="outline" size="sm" onClick={loadHistory} disabled={historyLoading}>
+            {historyLoading ? 'Atualizando...' : 'Atualizar'}
           </Button>
         </CardHeader>
 
@@ -440,7 +466,7 @@ export function CardioForm({
               <TableBody>
                 {history.map((h) => (
                   <TableRow key={h.id} className="border-border">
-                    <TableCell className="text-white">{format(new Date(h.date), 'dd/MM/yyyy')}</TableCell>
+                    <TableCell className="text-white">{formatDateSafe(h.date)}</TableCell>
                     <TableCell className="text-muted-foreground">{h.type}</TableCell>
                     <TableCell className="text-white">{h.duration} min</TableCell>
                     <TableCell className="text-white">
@@ -467,7 +493,7 @@ export function CardioForm({
 
                 {!historyLoading && history.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                       Nenhum cardio registrado ainda
                     </TableCell>
                   </TableRow>
@@ -475,7 +501,7 @@ export function CardioForm({
 
                 {historyLoading && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                       Carregando histórico...
                     </TableCell>
                   </TableRow>

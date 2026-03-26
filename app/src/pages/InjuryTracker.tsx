@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Plus, Calendar, Activity, CheckCircle2, Trash2, Bandage, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { MUSCLE_GROUPS } from '@/data/exercises';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import type { MuscleGroup } from '@/types';
+import { parseLocalDate, getTodayLocalDateString, formatLocalDate } from '@/lib/date'
 
 interface Injury {
   id: string;
@@ -72,6 +73,8 @@ const severityLabels: Record<number, { label: string; color: string }> = {
   10: { label: 'Crítico', color: 'bg-red-600' },
 };
 
+
+
 function mapDbToInjury(row: DbInjuryRow): Injury {
   return {
     id: row.id,
@@ -102,41 +105,42 @@ export function InjuryTracker({
   const [bodyPart, setBodyPart] = useState('');
   const [description, setDescription] = useState('');
   const [severity, setSeverity] = useState(5);
-  const [dateStarted, setDateStarted] = useState(format(new Date(), 'yyyy-MM-dd'));
+ const [dateStarted, setDateStarted] = useState(getTodayLocalDateString());
   const [notes, setNotes] = useState('');
 
   const activeInjuries = useMemo(() => injuries.filter((i) => i.status === 'active'), [injuries]);
   const recoveredInjuries = useMemo(() => injuries.filter((i) => i.status === 'recovered'), [injuries]);
   const chronicInjuries = useMemo(() => injuries.filter((i) => i.status === 'chronic'), [injuries]);
 
-  const loadInjuries = async () => {
-    if (!effectiveUserId) return;
+  const loadInjuries = useCallback(async () => {
+  if (!effectiveUserId) return;
 
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('injuries')
-        .select(
-          'id,user_id,body_part,description,severity,date_started,date_recovered,status,notes,affected_exercises,created_at,updated_at'
-        )
-        .eq('user_id', effectiveUserId)
-        .order('date_started', { ascending: false })
-        .order('created_at', { ascending: false });
+  setLoading(true);
+  try {
+    const { data, error } = await supabase
+      .from('injuries')
+      .select(
+        'id,user_id,body_part,description,severity,date_started,date_recovered,status,notes,affected_exercises,created_at,updated_at'
+      )
+      .eq('user_id', effectiveUserId)
+      .order('date_started', { ascending: false })
+      .order('created_at', { ascending: false });
 
-      if (error) throw error;
+    if (error) throw error;
 
-      setInjuries(((data ?? []) as DbInjuryRow[]).map(mapDbToInjury));
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao carregar lesões.');
-      setInjuries([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    setInjuries(((data ?? []) as DbInjuryRow[]).map(mapDbToInjury));
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Erro ao carregar lesões.';
+    toast.error(message);
+    setInjuries([]);
+  } finally {
+    setLoading(false);
+  }
+}, [effectiveUserId]);
 
   useEffect(() => {
-    void loadInjuries();
-  }, [effectiveUserId]);
+  void loadInjuries();
+}, [loadInjuries]);
 
   const handleSubmit = async () => {
     if (!user?.id) {
@@ -182,12 +186,13 @@ export function InjuryTracker({
       setBodyPart('');
       setDescription('');
       setSeverity(5);
-      setDateStarted(format(new Date(), 'yyyy-MM-dd'));
+      setDateStarted(getTodayLocalDateString());
       setNotes('');
       setIsAdding(false);
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao registrar lesão.');
-    }
+    } catch (e: unknown) {
+  const message = e instanceof Error ? e.message : 'Erro ao registrar lesão.';
+  toast.error(message);
+}
   };
 
   const handleRecover = async (id: string) => {
@@ -199,7 +204,7 @@ export function InjuryTracker({
     try {
       const updates = {
         status: 'recovered' as const,
-        date_recovered: format(new Date(), 'yyyy-MM-dd'),
+        date_recovered: getTodayLocalDateString(),
       };
 
       const { data, error } = await supabase
@@ -215,9 +220,10 @@ export function InjuryTracker({
 
       setInjuries((prev) => prev.map((item) => (item.id === id ? mapDbToInjury(data as DbInjuryRow) : item)));
       toast.success('Que ótima notícia! Recuperação completa! 🎉');
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao atualizar lesão.');
-    }
+    } catch (e: unknown) {
+  const message = e instanceof Error ? e.message : 'Erro ao atualizar lesão.';
+  toast.error(message);
+}
   };
 
   const handleMarkChronic = async (id: string) => {
@@ -240,9 +246,10 @@ export function InjuryTracker({
 
       setInjuries((prev) => prev.map((item) => (item.id === id ? mapDbToInjury(data as DbInjuryRow) : item)));
       toast.info('Marcado como condição crônica');
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao atualizar lesão.');
-    }
+    } catch (e: unknown) {
+  const message = e instanceof Error ? e.message : 'Erro ao atualizar lesão.';
+  toast.error(message);
+}
   };
 
   const handleDelete = async (id: string) => {
@@ -257,12 +264,17 @@ export function InjuryTracker({
 
       setInjuries((prev) => prev.filter((item) => item.id !== id));
       toast.success('Lesão removida.');
-    } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao remover lesão.');
-    }
+    } catch (e: unknown) {
+  const message = e instanceof Error ? e.message : 'Erro ao atualizar lesão.';
+  toast.error(message);
+}
   };
 
-  const getDaysSince = (date: string) => differenceInDays(new Date(), new Date(date));
+  const getDaysSince = (date: string) => {
+    const parsed = parseLocalDate(date);
+    if (!parsed) return 0;
+    return differenceInDays(new Date(), parsed);
+  };
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
@@ -518,7 +530,7 @@ export function InjuryTracker({
                   <p className="mt-1 text-sm text-muted-foreground">{injury.description}</p>
                   {injury.dateRecovered && (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Recuperado em {format(new Date(injury.dateRecovered), 'dd/MM/yyyy')}
+                      Recuperado em {formatLocalDate(injury.dateRecovered, (d) => format(d, 'dd/MM/yyyy'))}
                     </p>
                   )}
                 </CardContent>

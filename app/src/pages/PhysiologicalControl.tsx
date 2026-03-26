@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, Moon, Save, Heart, Wind, Droplets, History, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Slider } from '@/components/ui/slider'
+import { Textarea } from '@/components/ui/textarea'
 import { toast } from 'sonner'
 import type { PhysiologicalData } from '@/types'
 import { parseTimeToDecimal } from '@/lib/calculations'
@@ -13,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { getTodayLocalDateString, formatLocalDate } from '@/lib/date'
 
 interface PhysiologicalControlProps {
   onSave: (data: PhysiologicalData) => void
@@ -46,7 +48,7 @@ export function PhysiologicalControl({
   const effectiveUserId = selectedUserId || user?.id || null
   const isStudentMode = !!selectedUserId
 
-  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [date, setDate] = useState(getTodayLocalDateString())
   const [weight, setWeight] = useState('')
   const [restingHR, setRestingHR] = useState('')
   const [sleepHR, setSleepHR] = useState('')
@@ -60,15 +62,17 @@ export function PhysiologicalControl({
   const [fatigue, setFatigue] = useState(5)
   const [notes, setNotes] = useState('')
 
-  // Histórico (Supabase)
   const [historyLoading, setHistoryLoading] = useState(true)
   const [history, setHistory] = useState<PhysiologicalData[]>([])
 
-  // Calcular sono total em horas decimais
   const sleepTotalHours = parseTimeToDecimal(sleepTotal)
 
-  const loadHistory = async () => {
-    if (!effectiveUserId) return
+  const loadHistory = useCallback(async () => {
+    if (!effectiveUserId) {
+      setHistory([])
+      setHistoryLoading(false)
+      return
+    }
 
     setHistoryLoading(true)
     try {
@@ -114,12 +118,27 @@ export function PhysiologicalControl({
     } finally {
       setHistoryLoading(false)
     }
-  }
+  }, [effectiveUserId])
 
   useEffect(() => {
     void loadHistory()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveUserId])
+  }, [loadHistory])
+
+  const resetForm = () => {
+    setDate(getTodayLocalDateString())
+    setWeight('')
+    setRestingHR('')
+    setSleepHR('')
+    setSleepTotal('07:00')
+    setSleepREM('')
+    setSleepLight('')
+    setSleepDeep('')
+    setAwakeTime('')
+    setSpo2('')
+    setRespiratoryRate('')
+    setFatigue(5)
+    setNotes('')
+  }
 
   const handleSubmit = () => {
     if (isStudentMode) {
@@ -146,36 +165,19 @@ export function PhysiologicalControl({
     }
 
     onSave(data)
-    toast.success('Dados fisiológicos salvos!')
 
-    // otimista + recarrega do servidor
     setHistory((prev) => [data, ...prev].slice(0, 30))
     void loadHistory()
-
-    // Reset
-    setWeight('')
-    setRestingHR('')
-    setSleepHR('')
-    setSleepTotal('07:00')
-    setSleepREM('')
-    setSleepLight('')
-    setSleepDeep('')
-    setAwakeTime('')
-    setSpo2('')
-    setRespiratoryRate('')
-    setFatigue(5)
-    setNotes('')
+    resetForm()
   }
 
-  // Último registro: prioriza banco
   const latestData = useMemo(() => {
     if (history.length > 0) return history[0]
-    return physioData[physioData.length - 1]
+    return physioData[0] ?? physioData[physioData.length - 1]
   }, [history, physioData])
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Controle Fisiológico</h1>
@@ -196,7 +198,6 @@ export function PhysiologicalControl({
         </div>
       </div>
 
-      {/* Cards de resumo */}
       {latestData && (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Card className="bg-card border-border">
@@ -253,7 +254,6 @@ export function PhysiologicalControl({
         </div>
       )}
 
-      {/* Formulário */}
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-white">
@@ -268,7 +268,6 @@ export function PhysiologicalControl({
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Data e Peso */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="date">Data</Label>
@@ -323,7 +322,6 @@ export function PhysiologicalControl({
             </div>
           </div>
 
-          {/* Sono */}
           <div className="space-y-4">
             <h3 className="flex items-center gap-2 text-sm font-medium text-white">
               <Moon className="h-4 w-4 text-blue-400" />
@@ -398,7 +396,6 @@ export function PhysiologicalControl({
             </div>
           </div>
 
-          {/* Outros indicadores */}
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="spo2">SpO2 Média (%)</Label>
@@ -443,20 +440,18 @@ export function PhysiologicalControl({
             </div>
           </div>
 
-          {/* Observações */}
           <div className="space-y-2">
             <Label htmlFor="notes">Observações</Label>
-            <Input
+            <Textarea
               id="notes"
               placeholder="Como você se sente hoje?"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="bg-background border-border"
+              className="min-h-[90px] bg-background border-border"
               disabled={isStudentMode}
             />
           </div>
 
-          {/* Botão salvar */}
           <div className="flex justify-end">
             <Button
               onClick={handleSubmit}
@@ -471,7 +466,6 @@ export function PhysiologicalControl({
         </CardContent>
       </Card>
 
-      {/* Histórico */}
       <Card className="bg-card border-border">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-base text-white">
@@ -479,8 +473,8 @@ export function PhysiologicalControl({
             Histórico Fisiológico
           </CardTitle>
 
-          <Button variant="outline" size="sm" onClick={loadHistory}>
-            Atualizar
+          <Button variant="outline" size="sm" onClick={loadHistory} disabled={historyLoading}>
+            {historyLoading ? 'Atualizando...' : 'Atualizar'}
           </Button>
         </CardHeader>
 
@@ -502,7 +496,7 @@ export function PhysiologicalControl({
                 {history.map((h) => (
                   <TableRow key={h.id} className="border-border">
                     <TableCell className="text-white">
-                      {format(new Date(h.date), 'dd/MM/yyyy')}
+                      {formatLocalDate(h.date, (d) => format(d, 'dd/MM/yyyy'))}
                     </TableCell>
                     <TableCell className="text-white">
                       {h.weight !== undefined ? `${h.weight.toFixed(1)} kg` : '-'}

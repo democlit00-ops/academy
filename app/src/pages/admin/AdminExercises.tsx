@@ -1,3 +1,4 @@
+//academy\app\src\pages\admin\AdminExercises.tsx
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
@@ -109,7 +110,6 @@ export default function AdminExercises() {
 
   useEffect(() => {
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function openCreate() {

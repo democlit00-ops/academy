@@ -1,3 +1,4 @@
+//academy\app\src\pages\OneRepMax.tsx
 import { useEffect, useMemo, useState } from 'react';
 import { Calculator, TrendingUp, Info, Share2, Trophy, User } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';

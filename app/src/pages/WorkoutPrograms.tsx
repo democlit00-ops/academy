@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   BookOpen,
   Play,
@@ -290,7 +290,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const todayProgramDay = activeProgramDays.find((day) => weekdayLabel(day.weekday) === todayLabel)
   const todayProgramExercises = todayProgramDay ? (activeProgramItems[todayProgramDay.id] ?? []) : []
 
-  const loadExercises = async () => {
+  const loadExercises = useCallback(async () => {
     if (!canManagePrograms || !user) return
 
     const { data, error } = await supabase
@@ -316,9 +316,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     }))
 
     setExerciseOptions(normalized)
-  }
+  }, [canManagePrograms, user])
 
-  const loadActiveProgramContent = async (programId: string) => {
+  const loadActiveProgramContent = useCallback(async (programId: string) => {
     const { data: daysData, error: daysError } = await supabase
       .from('plan_days')
       .select('id, plan_id, weekday, day_title')
@@ -386,9 +386,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     }
 
     setActiveProgramItems(grouped)
-  }
+  }, [])
 
-  const loadProgramContentForEditor = async (programId: string) => {
+  const loadProgramContentForEditor = useCallback(async (programId: string) => {
     setContentLoading(true)
     try {
       const { data: days, error: daysErr } = await supabase
@@ -447,7 +447,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     } finally {
       setContentLoading(false)
     }
-  }
+  }, [])
 
   const openContentDialog = async (program: ProgramUI) => {
     setEditingContentProgram(program)
@@ -457,7 +457,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     await loadProgramContentForEditor(program.id)
   }
 
-  const reloadPrograms = async () => {
+  const reloadPrograms = useCallback(async () => {
     if (!user || !targetUserId) return
 
     const { data: publicPlans, error: publicPlansErr } = await supabase
@@ -583,7 +583,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       setActiveProgramDays([])
       setActiveProgramItems({})
     }
-  }
+  }, [user, targetUserId, canManagePrograms, role, loadActiveProgramContent])
 
   useEffect(() => {
     if (!user || !targetUserId) return
@@ -598,9 +598,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       }
     }
     void run()
-  }, [user, targetUserId, canManagePrograms, role])
+  }, [user, targetUserId, reloadPrograms, loadExercises])
 
-  const toggleProgram = async (programId: string) => {
+  const toggleProgram = useCallback(async (programId: string) => {
     const next = expandedProgram === programId ? null : programId
     setExpandedProgram(next)
     if (!next || details[next]) return
@@ -660,7 +660,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao carregar detalhes do programa.')
     }
-  }
+  }, [expandedProgram, details])
 
   const handleStartProgram = async (program: ProgramUI) => {
     if (!user || !targetUserId) return
@@ -769,7 +769,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     try {
       const { data, error } = await supabase
         .from('plan_days')
-        .select('weekday')
+        .select('id, weekday')
         .eq('plan_id', program.id)
         .order('weekday', { ascending: true })
       if (error) throw error
@@ -777,7 +777,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
         title: program.name,
         description: program.description,
         visibility: program.visibility,
-        weekdays: ((data ?? []) as Array<{ weekday: number }>).map((d) => d.weekday),
+        weekdays: ((data ?? []) as Array<{ id: string; weekday: number }>).map((d) => d.weekday),
       })
       setIsEditDialogOpen(true)
     } catch (e: any) {
@@ -837,7 +837,10 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const handleEditProgram = async () => {
     if (!user || !editingProgramId) return
     const title = programForm.title.trim()
+    const weekdays = [...programForm.weekdays].sort((a, b) => a - b)
     if (!title) return toast.error('Informe o nome do programa.')
+    if (weekdays.length === 0) return toast.error('Selecione pelo menos um dia da semana.')
+
     try {
       setFormSaving(true)
       const { error } = await supabase
@@ -851,10 +854,48 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
         .eq('id', editingProgramId)
         .eq('owner_id', user.id)
       if (error) throw error
+
+      const { data: existingDays, error: existingDaysErr } = await supabase
+        .from('plan_days')
+        .select('id')
+        .eq('plan_id', editingProgramId)
+      if (existingDaysErr) throw existingDaysErr
+
+      const existingDayIds = ((existingDays ?? []) as Array<{ id: string }>).map((d) => d.id)
+      if (existingDayIds.length > 0) {
+        const { error: deleteItemsErr } = await supabase
+          .from('plan_items')
+          .delete()
+          .in('plan_day_id', existingDayIds)
+        if (deleteItemsErr) throw deleteItemsErr
+      }
+
+      const { error: deleteDaysErr } = await supabase
+        .from('plan_days')
+        .delete()
+        .eq('plan_id', editingProgramId)
+      if (deleteDaysErr) throw deleteDaysErr
+
+      const { error: insertDaysErr } = await supabase.from('plan_days').insert(
+        weekdays.map((weekday) => ({
+          plan_id: editingProgramId,
+          weekday,
+          day_title: weekdayLabel(weekday),
+        }))
+      )
+      if (insertDaysErr) throw insertDaysErr
+
       toast.success('Programa atualizado com sucesso ✅')
       setIsEditDialogOpen(false)
       setEditingProgramId(null)
       await reloadPrograms()
+
+      if (editingContentProgram?.id === editingProgramId) {
+        await loadProgramContentForEditor(editingProgramId)
+      }
+      if (activeProgramId === editingProgramId) {
+        await loadActiveProgramContent(editingProgramId)
+      }
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao atualizar programa.')
     } finally {
@@ -921,7 +962,6 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao adicionar item.')
     } finally {
-      setSavingNewItemDayId(dayId)
       setSavingNewItemDayId(null)
     }
   }
@@ -955,7 +995,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       <div className="border-t border-border bg-muted/10 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-white">
               <UserPlus className="h-4 w-4 text-primary" />
               Atribuir alunos
             </h4>
@@ -1000,8 +1040,8 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="font-medium text-white truncate">{getProfileDisplayName(student, 'Aluno')}</div>
-                          <div className="text-xs text-muted-foreground truncate">{student.email ?? '—'}</div>
+                          <div className="truncate font-medium text-white">{getProfileDisplayName(student, 'Aluno')}</div>
+                          <div className="truncate text-xs text-muted-foreground">{student.email ?? '—'}</div>
                         </div>
                         <Badge variant={checked ? 'default' : 'outline'} className="shrink-0 text-xs">
                           {checked ? 'Selecionado' : 'Selecionar'}
@@ -1053,7 +1093,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                     <Badge variant="outline" className="text-xs"><Trophy className="mr-1 h-3 w-3" />{program.goal}</Badge>
 
                     {program.source === 'assigned' && (
-                      <Badge className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs">
+                      <Badge className="border border-blue-500/30 bg-blue-500/20 text-blue-300 text-xs">
                         <Users className="mr-1 h-3 w-3" />Indicado pelo professor
                       </Badge>
                     )}
@@ -1065,7 +1105,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                     )}
 
                     {program.source === 'owned' && (
-                      <Badge className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs">
+                      <Badge className="border border-purple-500/30 bg-purple-500/20 text-purple-300 text-xs">
                         Meu programa
                       </Badge>
                     )}
@@ -1076,7 +1116,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 {program.source === 'owned' && !isStudentMode && (
                   <>
                     <Button size="sm" variant="outline" className="gap-2" onClick={(e) => { e.stopPropagation(); void openContentDialog(program) }}>
@@ -1159,7 +1199,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Programas de Treino</h1>
           <p className="text-muted-foreground">
@@ -1200,16 +1240,16 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
 
       {activeProgram && (
         <Card className="border-primary/30 bg-gradient-to-r from-primary/20 to-purple-600/20">
-          <CardContent className="py-6 space-y-4">
+          <CardContent className="space-y-4 py-6">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="text-4xl">{activeProgram.image}</div>
                 <div>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-bold text-white">{activeProgram.name}</h3>
                     <Badge className="bg-primary text-primary-foreground"><Play className="mr-1 h-3 w-3" />Em Andamento</Badge>
                     {activeProgram.source === 'assigned' && (
-                      <Badge className="bg-blue-500/20 text-blue-300 border border-blue-500/30">Indicado pelo professor</Badge>
+                      <Badge className="border border-blue-500/30 bg-blue-500/20 text-blue-300">Indicado pelo professor</Badge>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">Semana {progress?.week || 1} • {activeProgram.duration}</p>
@@ -1241,7 +1281,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
             )}
 
             {todayProgramDay && (
-              <div className="rounded-xl border border-white/10 bg-background/30 p-4 space-y-3">
+              <div className="space-y-3 rounded-xl border border-white/10 bg-background/30 p-4">
                 <div>
                   <div className="text-sm text-muted-foreground">Hoje • {todayLabel}</div>
                   <div className="text-base font-semibold text-white">
@@ -1350,11 +1390,11 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
 
             <div className="space-y-2">
               <Label>Dias do programa</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {WEEKDAYS.map((day) => {
                   const checked = programForm.weekdays.includes(day.value)
                   return (
-                    <label key={day.value} className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 cursor-pointer">
+                    <label key={day.value} className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
                       <Checkbox checked={checked} onCheckedChange={() => toggleWeekdayInForm(day.value)} />
                       <span className="text-sm text-white">{day.label}</span>
                     </label>
@@ -1398,6 +1438,21 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                 )}
               </div>
             </div>
+
+            <div className="space-y-2">
+              <Label>Dias do programa</Label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {WEEKDAYS.map((day) => {
+                  const checked = programForm.weekdays.includes(day.value)
+                  return (
+                    <label key={day.value} className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
+                      <Checkbox checked={checked} onCheckedChange={() => toggleWeekdayInForm(day.value)} />
+                      <span className="text-sm text-white">{day.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
@@ -1427,7 +1482,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
               <div className="space-y-4">
                 {editorDays.map((day) => (
                   <div key={day.id} className="rounded-lg border border-border bg-card p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
                         <Badge variant="outline">{weekdayLabel(day.weekday)}</Badge>
                         <h3 className="font-medium text-white">{day.day_title ?? `Dia ${day.weekday}`}</h3>
@@ -1439,7 +1494,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                     </div>
 
                     {openNewItemDayId === day.id && (
-                      <div className="mb-4 rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-4">
+                      <div className="mb-4 space-y-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
                         <div className="flex flex-wrap gap-2">
                           <Button type="button" size="sm" variant={newItemForm.block === 'strength' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'strength' }))}>Força</Button>
                           <Button type="button" size="sm" variant={newItemForm.block === 'cardio' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'cardio' }))}>Cardio</Button>
@@ -1494,7 +1549,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         )}
 
                         {newItemForm.block === 'strength' ? (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                             <div className="space-y-2">
                               <Label>Séries</Label>
                               <Input type="number" value={newItemForm.sets} onChange={(e) => setNewItemForm((prev) => ({ ...prev, sets: e.target.value }))} placeholder="4" />
@@ -1509,7 +1564,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                             </div>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                             <div className="space-y-2">
                               <Label>Duração (min)</Label>
                               <Input type="number" value={newItemForm.duration_min} onChange={(e) => setNewItemForm((prev) => ({ ...prev, duration_min: e.target.value }))} placeholder="20" />

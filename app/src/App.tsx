@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from "./contexts/AuthContext";
 import AuthPage from "./pages/Auth";
+import ResetPassword from "./pages/ResetPassword";
 import CoachStudents from '@/pages/coach/CoachStudents';
 import AdminUsers from '@/pages/admin/AdminUsers';
 import { supabase } from './lib/supabase';
@@ -23,14 +24,12 @@ import {
   OneRepMax,
   InjuryTracker,
   ShareWorkout,
-  Wearables,
   WorkoutPrograms,
   Settings
 } from '@/pages';
 
 import AdminExercises from '@/pages/admin/AdminExercises';
-
-import { useAppData } from '@/hooks/useLocalStorage';
+import { useAppData } from '@/hooks/useAppData';
 import type {
   WorkoutSession,
   CardioSession,
@@ -46,12 +45,12 @@ type SelectedStudent = {
 };
 
 type StudentModeBadgeProps = {
-  student: SelectedStudent | null
-  onExit: () => void
-}
+  student: SelectedStudent | null;
+  onExit: () => void;
+};
 
 function StudentModeBadge({ student, onExit }: StudentModeBadgeProps) {
-  if (!student) return null
+  if (!student) return null;
 
   return (
     <div className="mb-5 flex justify-center">
@@ -64,7 +63,7 @@ function StudentModeBadge({ student, onExit }: StudentModeBadgeProps) {
 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary" className="bg-primary/15 text-primary border border-primary/20">
+                <Badge variant="secondary" className="border border-primary/20 bg-primary/15 text-primary">
                   Modo Aluno
                 </Badge>
                 <span className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -90,7 +89,7 @@ function StudentModeBadge({ student, onExit }: StudentModeBadgeProps) {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function MainApp() {
@@ -99,8 +98,8 @@ function MainApp() {
   const userKey = user?.id ?? '';
 
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
-  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
-  const [selectedStudentName, setSelectedStudentName] = useState<string>('');
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [selectedStudentName, setSelectedStudentName] = useState('');
 
   useEffect(() => {
     const adminPages: Page[] = ['admin_exercises', 'admin_users'];
@@ -118,7 +117,6 @@ function MainApp() {
     if (isCoachPage && role !== 'coach' && role !== 'admin') {
       setCurrentPage('dashboard');
       toast.error('Sem permissão para acessar esta área.');
-      return;
     }
   }, [currentPage, role]);
 
@@ -129,12 +127,9 @@ function MainApp() {
     setCardioSessions,
     physiologicalData,
     setPhysiologicalData,
-    splits,
-    setSplits,
-    activeSplitId,
-    setActiveSplitId,
     settings,
     setSettings,
+    reloadAppData,
   } = useAppData(userKey);
 
   const recoveryScores = useMemo(() => {
@@ -142,10 +137,7 @@ function MainApp() {
   }, [physiologicalData]);
 
   const selectedStudent = selectedStudentId
-    ? {
-        id: selectedStudentId,
-        name: selectedStudentName || 'Aluno selecionado',
-      }
+    ? { id: selectedStudentId, name: selectedStudentName || 'Aluno selecionado' }
     : null;
 
   const handleExitStudentMode = () => {
@@ -158,8 +150,6 @@ function MainApp() {
     if (!user) return;
 
     try {
-      setWorkoutSessions((prev: WorkoutSession[]) => [...prev, workout]);
-
       const weekdayMap: Record<string, number> = {
         Segunda: 1,
         Terça: 2,
@@ -181,9 +171,11 @@ function MainApp() {
       const { error } = await supabase.from('workout_sessions').insert(payload);
       if (error) throw error;
 
+      setWorkoutSessions((prev) => [workout, ...prev]);
       toast.success('Treino salvo ✅');
+      await reloadAppData();
     } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao salvar no Supabase. (Ficou salvo localmente)');
+      toast.error(e?.message ?? 'Erro ao salvar treino no servidor.');
     }
   };
 
@@ -191,8 +183,6 @@ function MainApp() {
     if (!user) return;
 
     try {
-      setCardioSessions((prev: CardioSession[]) => [...prev, cardio]);
-
       const isoWeekday = new Date(cardio.date + 'T00:00:00').getDay();
       const weekday = isoWeekday === 0 ? 7 : isoWeekday;
 
@@ -206,9 +196,11 @@ function MainApp() {
       const { error } = await supabase.from('cardio_sessions').insert(payload);
       if (error) throw error;
 
+      setCardioSessions((prev) => [cardio, ...prev]);
       toast.success('Cardio salvo ✅');
+      await reloadAppData();
     } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao salvar cardio no servidor. (Ficou salvo localmente)');
+      toast.error(e?.message ?? 'Erro ao salvar cardio no servidor.');
     }
   };
 
@@ -216,8 +208,6 @@ function MainApp() {
     if (!user) return;
 
     try {
-      setPhysiologicalData((prev: PhysiologicalData[]) => [...prev, data]);
-
       const payload = {
         user_id: user.id,
         entry_date: data.date,
@@ -227,51 +217,118 @@ function MainApp() {
       const { error } = await supabase.from('physio_entries').insert(payload);
       if (error) throw error;
 
+      setPhysiologicalData((prev) => [data, ...prev]);
+
+      const possibleWeight =
+        (data as any)?.weight ??
+        (data as any)?.bodyWeight ??
+        (data as any)?.peso ??
+        null;
+
+      if (
+        possibleWeight !== null &&
+        possibleWeight !== undefined &&
+        !Number.isNaN(Number(possibleWeight))
+      ) {
+        const { error: profileUpdateError } = await supabase
+          .from('profiles')
+          .update({ weight: Number(possibleWeight) })
+          .eq('id', user.id);
+
+        if (!profileUpdateError) {
+          setSettings((prev) => ({
+            ...prev,
+            weight: Number(possibleWeight),
+          }));
+        }
+      }
+
       toast.success('Fisiológico salvo ✅');
+      await reloadAppData();
     } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao salvar fisiológico no servidor. (Ficou salvo localmente)');
+      toast.error(e?.message ?? 'Erro ao salvar fisiológico no servidor.');
     }
   };
 
-  const handleSaveSettings = (newSettings: UserSettings) => {
-    setSettings(newSettings);
-    toast.success('Configurações salvas!');
+  const handleSaveSettings = async (newSettings: UserSettings) => {
+    if (!user) return;
+
+    try {
+      const payload = {
+        name: newSettings.name ?? null,
+        full_name: newSettings.name ?? null,
+        age: newSettings.age ?? null,
+        weight: newSettings.weight ?? null,
+        height: newSettings.height ?? null,
+        fitness_goal: newSettings.fitnessGoal ?? null,
+        preferred_weight_unit: newSettings.preferredUnits?.weight ?? 'kg',
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await supabase
+        .from('profiles')
+        .update(payload)
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      setSettings(newSettings);
+      toast.success('Configurações salvas no servidor ✅');
+      await reloadAppData();
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao salvar configurações no servidor.');
+    }
   };
 
-  
-  
+  const handleClearData = async () => {
+    if (!user) return;
 
-  const handleClearData = () => {
-    setWorkoutSessions([]);
-    setCardioSessions([]);
-    setPhysiologicalData([]);
-    setSplits([]);
-    setActiveSplitId('');
-    toast.success('Dados locais apagados!');
+    try {
+      const userId = user.id;
+
+      const workoutDelete = await supabase.from('workout_sessions').delete().eq('user_id', userId);
+      if (workoutDelete.error) throw workoutDelete.error;
+
+      const cardioDelete = await supabase.from('cardio_sessions').delete().eq('user_id', userId);
+      if (cardioDelete.error) throw cardioDelete.error;
+
+      const physioDelete = await supabase.from('physio_entries').delete().eq('user_id', userId);
+      if (physioDelete.error) throw physioDelete.error;
+
+      const injuriesDelete = await supabase.from('injuries').delete().eq('user_id', userId);
+      if (injuriesDelete.error) throw injuriesDelete.error;
+
+      setWorkoutSessions([]);
+      setCardioSessions([]);
+      setPhysiologicalData([]);
+
+      await reloadAppData();
+      toast.success('Seus registros foram apagados do servidor ✅');
+    } catch (e: any) {
+      console.error('Erro ao apagar dados:', e);
+      toast.error(e?.message ?? 'Erro ao apagar seus dados no servidor.');
+    }
   };
 
-  const handleExportData = () => {
-    const data = {
-      workouts: workoutSessions,
-      cardio: cardioSessions,
-      physiological: physiologicalData,
-      splits,
-      activeSplitId,
-      settings,
-      exportedAt: new Date().toISOString(),
-    };
+  const handleRequestPasswordReset = async () => {
+    if (!user?.email) {
+      toast.error('Não foi possível identificar seu email.');
+      return;
+    }
 
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fittrack-backup-local-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+      const redirectBase = window.location.origin;
 
-    toast.success('Backup local exportado!');
+      const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+        redirectTo: `${redirectBase}/reset-password`,
+      });
+
+      if (error) throw error;
+
+      toast.success('Enviamos um email para redefinir sua senha ✅');
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao enviar email de redefinição de senha.');
+    }
   };
 
   const renderPage = () => {
@@ -289,22 +346,22 @@ function MainApp() {
         );
 
       case 'workout':
-        return (
-          <WorkoutForm
-            onSave={handleSaveWorkout}
-            selectedUserId={selectedStudentId || null}
-            selectedUserLabel={selectedStudentName || null}
-          />
-        );
+  return (
+    <WorkoutForm
+      onSave={handleSaveWorkout}
+      selectedUserId={null}
+      selectedUserLabel={null}
+    />
+  );
 
-      case 'cardio':
-        return (
-          <CardioForm
-            onSave={handleSaveCardio}
-            selectedUserId={selectedStudentId || null}
-            selectedUserLabel={selectedStudentName || null}
-          />
-        );
+     case 'cardio':
+  return (
+    <CardioForm
+      onSave={handleSaveCardio}
+      selectedUserId={null}
+      selectedUserLabel={null}
+    />
+  );
 
       case 'loads':
         return (
@@ -326,7 +383,7 @@ function MainApp() {
         );
 
       case 'history':
-        return <WorkoutHistory selectedUserId={selectedStudentId || user?.id || ''} />;
+        return <WorkoutHistory selectedUserId={selectedStudentId ? selectedStudentId : (user?.id || '')} />;
 
       case 'analysis':
         return (
@@ -337,16 +394,13 @@ function MainApp() {
           />
         );
 
-     
       case 'split':
         return (
           <WorkoutSplitPlanner
-           selectedUserId={selectedStudentId || null}
-           selectedUserLabel={selectedStudentName || null}
-    />
-  )
-
-
+            selectedUserId={selectedStudentId || null}
+            selectedUserLabel={selectedStudentName || null}
+          />
+        );
 
       case 'onerm':
         return (
@@ -383,9 +437,7 @@ function MainApp() {
           />
         );
 
-      case 'wearables':
-        return <Wearables />;
-
+      
       case 'admin_exercises':
         return role === 'admin' ? <AdminExercises /> : null;
 
@@ -410,7 +462,8 @@ function MainApp() {
             settings={settings}
             onSaveSettings={handleSaveSettings}
             onClearData={handleClearData}
-            onExportData={handleExportData}
+            onRequestPasswordReset={handleRequestPasswordReset}
+            coachName={null}
           />
         );
 
@@ -451,13 +504,9 @@ function MainApp() {
           onExitStudentMode={handleExitStudentMode}
         />
 
-        <main className="flex-1 min-h-screen p-4 pb-24 lg:p-8 lg:pb-8">
+        <main className="min-h-screen flex-1 p-4 pb-24 lg:p-8 lg:pb-8">
           <div className="mx-auto max-w-7xl">
-            <StudentModeBadge
-              student={selectedStudent}
-              onExit={handleExitStudentMode}
-            />
-
+            <StudentModeBadge student={selectedStudent} onExit={handleExitStudentMode} />
             {renderPage()}
           </div>
         </main>
@@ -468,13 +517,61 @@ function MainApp() {
 
 export default function App() {
   const { user, loading } = useAuth();
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+
+  useEffect(() => {
+    const checkRecoveryMode = async () => {
+      const hash = window.location.hash || '';
+      const search = window.location.search || '';
+      const pathname = window.location.pathname.toLowerCase();
+      const fullUrl = `${pathname}${search}${hash}`.toLowerCase();
+
+      const looksLikeRecovery =
+        fullUrl.includes('type=recovery') ||
+        fullUrl.includes('access_token=') ||
+        fullUrl.includes('refresh_token=');
+
+      if (looksLikeRecovery || pathname === '/reset-password') {
+        setIsRecoveryMode(true);
+        return;
+      }
+
+      const { data } = await supabase.auth.getSession();
+      if (pathname === '/reset-password' && data.session) {
+        setIsRecoveryMode(true);
+      }
+    };
+
+    void checkRecoveryMode();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+      }
+    });
+
+    const onHashChange = () => {
+      void checkRecoveryMode();
+    };
+
+    window.addEventListener('hashchange', onHashChange);
+
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0b1220] text-white flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#0b1220] text-white">
         <div className="text-white/70">Carregando...</div>
       </div>
     );
+  }
+
+  if (isRecoveryMode) {
+    return <ResetPassword />;
   }
 
   if (!user) return <AuthPage />;

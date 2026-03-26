@@ -1,3 +1,4 @@
+//academy\app\src\pages\coach\CoachStudents.tsx
 import { useEffect, useMemo, useState } from 'react'
 import { Users, Search, ExternalLink } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'

@@ -1,15 +1,42 @@
-import type { 
-  WorkoutSession, 
-  CardioSession, 
-  PhysiologicalData, 
+import type {
+  WorkoutSession,
+  CardioSession,
+  PhysiologicalData,
   RecoveryScore,
   ExerciseProgress,
   MuscleVolumeData,
   MuscleGroup,
   LoadProgressionStatus,
-  WorkoutExercise 
+  WorkoutExercise
 } from '@/types';
 import { MUSCLE_GROUPS } from '@/data/exercises';
+
+// ============================================
+// HELPERS DE DATA LOCAL SEGURA
+// ============================================
+
+export function parseLocalDate(date: string | null | undefined): Date | null {
+  if (!date) return null;
+
+  // Para strings YYYY-MM-DD, forçamos meia-noite local
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const parsed = new Date(`${date}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(date);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export function getTodayLocalDateString(): string {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().split('T')[0];
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
 
 // ============================================
 // CONVERSÃO DE TEMPO
@@ -33,14 +60,12 @@ export function decimalToTimeString(decimal: number): string {
 // ============================================
 
 export function calculateExerciseVolume(exercise: WorkoutExercise): number {
-  // Volume (kg) = peso × reps por série
-  // Nota: em muitos treinos o usuário registra apenas a carga e deixa reps em branco.
-  // Para não “zerar” o volume (e quebrar dashboards), aplicamos um fallback conservador.
   const DEFAULT_REPS_FALLBACK = 10;
+
   return exercise.sets.reduce((total, set) => {
     const weight = Number(set.weight) || 0;
     const reps = Number(set.reps) > 0 ? Number(set.reps) : DEFAULT_REPS_FALLBACK;
-    return total + (weight * reps);
+    return total + weight * reps;
   }, 0);
 }
 
@@ -50,17 +75,21 @@ export function calculateWorkoutVolume(session: WorkoutSession): number {
 
 export function getMaxWeightForExercise(exercise: WorkoutExercise): number {
   const weights = exercise.sets
-    .map(s => Number(s.weight) || 0)
-    .filter(w => w > 0);
+    .map((s) => Number(s.weight) || 0)
+    .filter((w) => w > 0);
+
   return weights.length ? Math.max(...weights) : 0;
 }
 
 export function getAverageWeightForExercise(exercise: WorkoutExercise): number {
   if (!exercise.sets || exercise.sets.length === 0) return 0;
+
   const weights = exercise.sets
-    .map(s => Number(s.weight) || 0)
-    .filter(w => w > 0);
+    .map((s) => Number(s.weight) || 0)
+    .filter((w) => w > 0);
+
   if (weights.length === 0) return 0;
+
   const total = weights.reduce((sum, w) => sum + w, 0);
   return total / weights.length;
 }
@@ -84,9 +113,9 @@ export function determineLoadProgression(
 
 export function getLoadProgressionColor(status: LoadProgressionStatus): string {
   switch (status) {
-    case 'Subir carga': return '#22c55e'; // verde
-    case 'Manter carga': return '#3b82f6'; // azul
-    case 'Reduzir carga': return '#ef4444'; // vermelho
+    case 'Subir carga': return '#22c55e';
+    case 'Manter carga': return '#3b82f6';
+    case 'Reduzir carga': return '#ef4444';
     default: return '#6b7280';
   }
 }
@@ -96,9 +125,9 @@ export function getLoadProgressionColor(status: LoadProgressionStatus): string {
 // ============================================
 
 export function calculateRecoveryScore(physio: PhysiologicalData): RecoveryScore {
-  // Sono: 40% (baseado em 7-9 horas ideais)
   const sleepHours = physio.sleepTotalHours || 0;
   let sleepScore = 0;
+
   if (sleepHours >= 7 && sleepHours <= 9) {
     sleepScore = 100;
   } else if (sleepHours >= 6 && sleepHours < 7) {
@@ -113,9 +142,9 @@ export function calculateRecoveryScore(physio: PhysiologicalData): RecoveryScore
     sleepScore = 30;
   }
 
-  // FC de repouso: 30% (baseado em 50-70 bpm ideal)
   const restingHR = physio.restingHeartRate || 70;
   let hrScore = 0;
+
   if (restingHR >= 50 && restingHR <= 60) {
     hrScore = 100;
   } else if (restingHR > 60 && restingHR <= 70) {
@@ -125,21 +154,18 @@ export function calculateRecoveryScore(physio: PhysiologicalData): RecoveryScore
   } else if (restingHR > 80) {
     hrScore = 40;
   } else if (restingHR < 50) {
-    hrScore = 90; // Atleta
+    hrScore = 90;
   }
 
-  // Cansaço: 30% (invertido - menor é melhor)
   const fatigue = physio.fatigue || 5;
-  const fatigueScore = Math.max(0, 100 - (fatigue * 10));
+  const fatigueScore = Math.max(0, 100 - fatigue * 10);
 
-  // Score final ponderado
   const finalScore = Math.round(
-    (sleepScore * 0.40) + 
-    (hrScore * 0.30) + 
-    (fatigueScore * 0.30)
+    sleepScore * 0.4 +
+    hrScore * 0.3 +
+    fatigueScore * 0.3
   );
 
-  // Classificação
   let classification: RecoveryScore['classification'];
   if (finalScore >= 80) classification = 'Ótima';
   else if (finalScore >= 60) classification = 'Boa';
@@ -168,15 +194,18 @@ export function getRecoveryScoreColor(score: number): string {
 // ============================================
 
 export function getWeekStart(date: Date): Date {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Segunda como início
-  return new Date(d.setDate(diff));
+  const localDate = startOfLocalDay(date);
+  const day = localDate.getDay();
+  const diff = localDate.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(localDate.getFullYear(), localDate.getMonth(), diff);
 }
 
 export function getWeekKey(date: Date): string {
   const weekStart = getWeekStart(date);
-  return weekStart.toISOString().split('T')[0];
+  const year = weekStart.getFullYear();
+  const month = String(weekStart.getMonth() + 1).padStart(2, '0');
+  const day = String(weekStart.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function calculateWeeklyStats(
@@ -193,11 +222,12 @@ export function calculateWeeklyStats(
     muscleVolumes: Record<MuscleGroup, number>;
   }> = {};
 
-  // Inicializar todas as semanas
-  [...workouts, ...cardio].forEach(session => {
-    const date = new Date(session.date);
+  [...workouts, ...cardio].forEach((session) => {
+    const date = parseLocalDate(session.date);
+    if (!date) return;
+
     const weekKey = getWeekKey(date);
-    
+
     if (!stats[weekKey]) {
       stats[weekKey] = {
         weekStart: weekKey,
@@ -208,38 +238,47 @@ export function calculateWeeklyStats(
         avgRPE: 0,
         muscleVolumes: {} as Record<MuscleGroup, number>,
       };
-      MUSCLE_GROUPS.forEach(mg => stats[weekKey].muscleVolumes[mg] = 0);
+
+      MUSCLE_GROUPS.forEach((mg) => {
+        stats[weekKey].muscleVolumes[mg] = 0;
+      });
     }
   });
 
-  // Processar treinos
-  workouts.forEach(workout => {
-    const weekKey = getWeekKey(new Date(workout.date));
+  workouts.forEach((workout) => {
+    const workoutDate = parseLocalDate(workout.date);
+    if (!workoutDate) return;
+
+    const weekKey = getWeekKey(workoutDate);
     if (!stats[weekKey]) return;
-    
+
     stats[weekKey].totalWorkouts++;
     stats[weekKey].totalVolume += calculateWorkoutVolume(workout);
-    
-    workout.exercises.forEach(ex => {
+
+    workout.exercises.forEach((ex) => {
       const volume = calculateExerciseVolume(ex);
       stats[weekKey].muscleVolumes[ex.muscleGroup] += volume;
     });
   });
 
-  // Processar cardio
-  cardio.forEach(session => {
-    const weekKey = getWeekKey(new Date(session.date));
+  cardio.forEach((session) => {
+    const cardioDate = parseLocalDate(session.date);
+    if (!cardioDate) return;
+
+    const weekKey = getWeekKey(cardioDate);
     if (!stats[weekKey]) return;
-    
+
     stats[weekKey].totalCardioMinutes += session.duration;
     if (session.distance) {
       stats[weekKey].totalCardioDistance += session.distance;
     }
   });
 
-  return Object.values(stats).sort((a, b) => 
-    new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime()
-  );
+  return Object.values(stats).sort((a, b) => {
+    const da = parseLocalDate(a.weekStart)?.getTime() ?? 0;
+    const db = parseLocalDate(b.weekStart)?.getTime() ?? 0;
+    return da - db;
+  });
 }
 
 // ============================================
@@ -252,10 +291,10 @@ export function calculateExerciseProgress(
 ): ExerciseProgress[] {
   const progressMap: Record<string, ExerciseProgress> = {};
 
-  workouts.forEach(workout => {
-    workout.exercises.forEach(ex => {
+  workouts.forEach((workout) => {
+    workout.exercises.forEach((ex) => {
       if (exerciseId && ex.exerciseId !== exerciseId) return;
-      
+
       if (!progressMap[ex.exerciseId]) {
         progressMap[ex.exerciseId] = {
           exerciseId: ex.exerciseId,
@@ -274,9 +313,12 @@ export function calculateExerciseProgress(
     });
   });
 
-  // Ordenar histórico por data
-  Object.values(progressMap).forEach(p => {
-    p.history.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  Object.values(progressMap).forEach((p) => {
+    p.history.sort((a, b) => {
+      const da = parseLocalDate(a.date)?.getTime() ?? 0;
+      const db = parseLocalDate(b.date)?.getTime() ?? 0;
+      return da - db;
+    });
   });
 
   return Object.values(progressMap);
@@ -289,23 +331,24 @@ export function calculateExerciseProgress(
 export function calculateMuscleVolumeData(
   workouts: WorkoutSession[]
 ): MuscleVolumeData[] {
-  const muscleData: Record<MuscleGroup, { weekly: number; monthly: number; count: number }> = 
+  const muscleData: Record<MuscleGroup, { weekly: number; monthly: number; count: number }> =
     {} as Record<MuscleGroup, { weekly: number; monthly: number; count: number }>;
-  
-  MUSCLE_GROUPS.forEach(mg => {
+
+  MUSCLE_GROUPS.forEach((mg) => {
     muscleData[mg] = { weekly: 0, monthly: 0, count: 0 };
   });
 
-  const now = new Date();
+  const now = startOfLocalDay(new Date());
   const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  workouts.forEach(workout => {
-    const workoutDate = new Date(workout.date);
-    
-    workout.exercises.forEach(ex => {
+  workouts.forEach((workout) => {
+    const workoutDate = parseLocalDate(workout.date);
+    if (!workoutDate) return;
+
+    workout.exercises.forEach((ex) => {
       const volume = calculateExerciseVolume(ex);
-      
+
       if (workoutDate >= oneWeekAgo) {
         muscleData[ex.muscleGroup].weekly += volume;
       }
@@ -316,7 +359,7 @@ export function calculateMuscleVolumeData(
     });
   });
 
-  return MUSCLE_GROUPS.map(mg => ({
+  return MUSCLE_GROUPS.map((mg) => ({
     muscleGroup: mg,
     weeklyVolume: muscleData[mg].weekly,
     monthlyVolume: muscleData[mg].monthly,
@@ -333,10 +376,14 @@ export function filterByDateRange<T extends { date: string }>(
   startDate?: string,
   endDate?: string
 ): T[] {
-  return items.filter(item => {
-    const itemDate = new Date(item.date);
-    if (startDate && itemDate < new Date(startDate)) return false;
-    if (endDate && itemDate > new Date(endDate)) return false;
+  const start = parseLocalDate(startDate);
+  const end = parseLocalDate(endDate);
+
+  return items.filter((item) => {
+    const itemDate = parseLocalDate(item.date);
+    if (!itemDate) return false;
+    if (start && itemDate < start) return false;
+    if (end && itemDate > end) return false;
     return true;
   });
 }
@@ -345,8 +392,8 @@ export function filterByMuscleGroup(
   workouts: WorkoutSession[],
   muscleGroup: MuscleGroup
 ): WorkoutSession[] {
-  return workouts.filter(w => 
-    w.exercises.some(e => e.muscleGroup === muscleGroup)
+  return workouts.filter((w) =>
+    w.exercises.some((e) => e.muscleGroup === muscleGroup)
   );
 }
 
@@ -354,8 +401,8 @@ export function filterByExercise(
   workouts: WorkoutSession[],
   exerciseId: string
 ): WorkoutSession[] {
-  return workouts.filter(w => 
-    w.exercises.some(e => e.exerciseId === exerciseId)
+  return workouts.filter((w) =>
+    w.exercises.some((e) => e.exerciseId === exerciseId)
   );
 }
 

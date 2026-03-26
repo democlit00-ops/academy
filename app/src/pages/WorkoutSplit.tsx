@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Calendar,
   Check,
@@ -259,16 +259,16 @@ function SplitCard({
 }) {
   return (
     <Card className="border-border/60 bg-card/60">
-      <CardContent className="p-4 space-y-4">
+      <CardContent className="space-y-4 p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="space-y-2 min-w-0">
+          <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-lg font-semibold text-white">{split.name}</h3>
-              {isActive && <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Ativo</Badge>}
+              {isActive && <Badge className="border-green-500/30 bg-green-500/20 text-green-400">Ativo</Badge>}
               <Badge variant="secondary">{split.daysPerWeek} dias</Badge>
               <Badge variant="outline">{split.visibility === 'public' ? 'Público' : 'Privado'}</Badge>
-              {split.source === 'assigned' && <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Atribuído</Badge>}
-              {split.source === 'owned' && <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">Meu</Badge>}
+              {split.source === 'assigned' && <Badge className="border-blue-500/30 bg-blue-500/20 text-blue-400">Atribuído</Badge>}
+              {split.source === 'owned' && <Badge className="border-purple-500/30 bg-purple-500/20 text-purple-400">Meu</Badge>}
             </div>
             <p className="text-sm text-muted-foreground">{split.description}</p>
             {typeof assignedCount === 'number' && assignedCount > 0 && (
@@ -278,34 +278,34 @@ function SplitCard({
 
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={onToggle} className="gap-2">
-              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               {isExpanded ? 'Ocultar' : 'Detalhes'}
             </Button>
 
             {canSetActive && (
               <Button size="sm" onClick={onSetActive} disabled={isActive || activating} className="gap-2">
-                <Play className="w-4 h-4" />
+                <Play className="h-4 w-4" />
                 {isActive ? 'Ativo' : activating ? 'Salvando...' : 'Definir ativo'}
               </Button>
             )}
 
             {canManage && onAssign && (
               <Button variant="outline" size="sm" onClick={onAssign} className="gap-2">
-                <UserPlus className="w-4 h-4" />
+                <UserPlus className="h-4 w-4" />
                 {assignLabel || 'Atribuir'}
               </Button>
             )}
 
             {canManage && onEdit && (
               <Button variant="outline" size="sm" onClick={onEdit} className="gap-2">
-                <Pencil className="w-4 h-4" />
+                <Pencil className="h-4 w-4" />
                 Editar
               </Button>
             )}
 
             {canManage && onDelete && (
               <Button variant="outline" size="sm" onClick={onDelete} className="gap-2 border-red-500/30 text-red-400 hover:bg-red-500/10">
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="h-4 w-4" />
                 Excluir
               </Button>
             )}
@@ -319,7 +319,7 @@ function SplitCard({
               const isRest = groups.length === 0 && (day.day_title ?? '').toLowerCase().includes('descanso')
 
               return (
-                <div key={day.id} className="rounded-xl border border-border/60 bg-background/40 p-3 space-y-3">
+                <div key={day.id} className="space-y-3 rounded-xl border border-border/60 bg-background/40 p-3">
                   <div>
                     <div className="text-sm font-medium text-white">{weekdayNumberToLabel(day.weekday)}</div>
                     <div className="text-xs text-muted-foreground">{day.day_title || (isRest ? 'Descanso' : 'Treino')}</div>
@@ -383,7 +383,10 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
   const assignedSplitIds = useMemo(() => new Set(assignedSplits.map((split) => split.id)), [assignedSplits])
 
   const allVisibleSplits = useMemo(
-    () => [...assignedSplits, ...publicSplits, ...ownedSplits].filter((split, index, arr) => arr.findIndex((x) => x.id === split.id) === index),
+    () =>
+      [...assignedSplits, ...publicSplits, ...ownedSplits].filter(
+        (split, index, arr) => arr.findIndex((x) => x.id === split.id) === index
+      ),
     [assignedSplits, publicSplits, ownedSplits]
   )
 
@@ -392,7 +395,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
     [allVisibleSplits, activeSplitId]
   )
 
-  const loadDaysCountByPlan = async (planIds: string[]) => {
+  const loadDaysCountByPlan = useCallback(async (planIds: string[]) => {
     if (planIds.length === 0) return {}
 
     const { data, error } = await supabase
@@ -414,26 +417,29 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
     }
 
     return map
-  }
+  }, [])
 
-  const loadSplitDetails = async (splitId: string) => {
-    if (details[splitId]) return
+  const loadSplitDetails = useCallback(
+    async (splitId: string) => {
+      if (details[splitId]) return
 
-    const { data, error } = await supabase
-      .from('plan_days')
-      .select('id,plan_id,weekday,day_title,muscle_groups')
-      .eq('plan_id', splitId)
-      .order('weekday', { ascending: true })
+      const { data, error } = await supabase
+        .from('plan_days')
+        .select('id,plan_id,weekday,day_title,muscle_groups')
+        .eq('plan_id', splitId)
+        .order('weekday', { ascending: true })
 
-    if (error) throw error
+      if (error) throw error
 
-    setDetails((prev) => ({
-      ...prev,
-      [splitId]: (data ?? []) as DbPlanDay[],
-    }))
-  }
+      setDetails((prev) => ({
+        ...prev,
+        [splitId]: (data ?? []) as DbPlanDay[],
+      }))
+    },
+    [details]
+  )
 
-  const reloadSplits = async () => {
+  const reloadSplits = useCallback(async () => {
     if (!user || !targetUserId) return
 
     const { data: publicPlans, error: publicErr } = await supabase
@@ -451,7 +457,9 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
       .eq('student_id', targetUserId)
     if (assignmentErr) throw assignmentErr
 
-    const linkedSplitIds = Array.from(new Set(((assignmentRows ?? []) as PlanStudentRow[]).map((row) => row.plan_id).filter(Boolean)))
+    const linkedSplitIds = Array.from(
+      new Set(((assignmentRows ?? []) as PlanStudentRow[]).map((row) => row.plan_id).filter(Boolean))
+    )
 
     let assignedPlans: DbPlan[] = []
     if (linkedSplitIds.length > 0) {
@@ -569,7 +577,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
         [nextActiveSplitId]: (activeDays ?? []) as DbPlanDay[],
       }))
     }
-  }
+  }, [user, targetUserId, canManageSplits, role, loadDaysCountByPlan])
 
   useEffect(() => {
     if (!user || !targetUserId) return
@@ -586,7 +594,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
     }
 
     void run()
-  }, [user, targetUserId, role])
+  }, [user, targetUserId, reloadSplits])
 
   const openCreateDialog = () => {
     setEditingSplitId(null)
@@ -607,7 +615,9 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
         day: weekdayNumberToLabel(day.weekday),
         muscleGroups: normalizeMuscleGroups(day.muscle_groups),
         focus: day.day_title ?? '',
-        isRestDay: normalizeMuscleGroups(day.muscle_groups).length === 0 && (day.day_title ?? '').toLowerCase().includes('descanso'),
+        isRestDay:
+          normalizeMuscleGroups(day.muscle_groups).length === 0 &&
+          (day.day_title ?? '').toLowerCase().includes('descanso'),
       }))
 
       setEditingSplitId(split.id)
@@ -851,15 +861,15 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
   }
 
   const rawToday = new Date().toLocaleDateString('pt-BR', { weekday: 'long' })
-  const normalizedToday = rawToday
-    .replace('-feira', '')
-    .replace('-feira', '')
-    .trim()
+  const normalizedToday = rawToday.replace('-feira', '').trim()
   const todayLabel = (normalizedToday.charAt(0).toUpperCase() + normalizedToday.slice(1)) as WeekDay
   const activeSplitDetails = activeSplitId ? details[activeSplitId] : undefined
   const todayPlan = activeSplitDetails?.find((day) => weekdayNumberToLabel(day.weekday) === todayLabel)
   const todayGroups = normalizeMuscleGroups(todayPlan?.muscle_groups)
-  const isTodayRest = !!todayPlan && todayGroups.length === 0 && (todayPlan.day_title ?? '').toLowerCase().includes('descanso')
+  const isTodayRest =
+    !!todayPlan &&
+    todayGroups.length === 0 &&
+    (todayPlan.day_title ?? '').toLowerCase().includes('descanso')
   const weeklyTrainingDays = activeSplit?.daysPerWeek ?? 0
 
   return (
@@ -872,7 +882,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
 
         {canManageSplits && (
           <Button onClick={openCreateDialog} className="gap-2">
-            <Plus className="w-4 h-4" />
+            <Plus className="h-4 w-4" />
             Novo split
           </Button>
         )}
@@ -889,26 +899,26 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
       )}
 
       {activeSplit && (
-        <Card className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 border-blue-500/30">
-          <CardContent className="py-6 space-y-5">
+        <Card className="border-blue-500/30 bg-gradient-to-r from-blue-600/20 to-purple-600/20">
+          <CardContent className="space-y-5 py-6">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-center gap-4 min-w-0">
-                <div className="w-14 h-14 rounded-xl bg-blue-500/20 flex items-center justify-center shrink-0">
-                  <Dumbbell className="w-7 h-7 text-blue-400" />
+              <div className="flex min-w-0 items-center gap-4">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-blue-500/20">
+                  <Dumbbell className="h-7 w-7 text-blue-400" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm text-muted-foreground">Split ativo</p>
-                  <h3 className="text-xl font-bold text-white truncate">{activeSplit.name}</h3>
+                  <h3 className="truncate text-xl font-bold text-white">{activeSplit.name}</h3>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Badge variant="secondary">{weeklyTrainingDays} dias de treino</Badge>
                     <Badge variant="outline">{activeSplit.visibility === 'public' ? 'Público' : 'Privado'}</Badge>
-                    {activeSplit.source === 'assigned' && <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">Atribuído</Badge>}
-                    {activeSplit.source === 'owned' && <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">Meu</Badge>}
+                    {activeSplit.source === 'assigned' && <Badge className="border-blue-500/30 bg-blue-500/20 text-blue-400">Atribuído</Badge>}
+                    {activeSplit.source === 'owned' && <Badge className="border-purple-500/30 bg-purple-500/20 text-purple-400">Meu</Badge>}
                   </div>
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/10 bg-background/30 px-4 py-3 min-w-[220px]">
+              <div className="min-w-[220px] rounded-xl border border-white/10 bg-background/30 px-4 py-3">
                 <div className="text-xs uppercase tracking-wide text-muted-foreground">Hoje</div>
                 <div className="mt-1 text-sm font-medium text-white">{todayLabel}</div>
                 <div className="mt-2 text-sm text-muted-foreground">
@@ -917,7 +927,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
               </div>
             </div>
 
-            <div className="rounded-xl border border-white/10 bg-background/30 p-4 space-y-3">
+            <div className="space-y-3 rounded-xl border border-white/10 bg-background/30 p-4">
               <div>
                 <div className="text-sm text-muted-foreground">Foco do dia</div>
                 <div className="text-base font-semibold text-white">
@@ -953,7 +963,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
         <>
           <section className="space-y-3">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-blue-400" />
+              <Sparkles className="h-5 w-5 text-blue-400" />
               <h2 className="text-lg font-semibold text-white">Splits atribuídos ao aluno</h2>
             </div>
 
@@ -988,7 +998,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
 
           <section className="space-y-3">
             <div className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-purple-400" />
+              <Calendar className="h-5 w-5 text-purple-400" />
               <h2 className="text-lg font-semibold text-white">Biblioteca pública de splits</h2>
             </div>
 
@@ -1024,7 +1034,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
           {canManageSplits && (
             <section className="space-y-3">
               <div className="flex items-center gap-2">
-                <Users className="w-5 h-5 text-emerald-400" />
+                <Users className="h-5 w-5 text-emerald-400" />
                 <h2 className="text-lg font-semibold text-white">Meus splits</h2>
               </div>
 
@@ -1101,10 +1111,10 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="font-medium text-white truncate">{getProfileDisplayName(student, 'Aluno')}</div>
-                          <div className="text-xs text-muted-foreground truncate">{student.email ?? '—'}</div>
+                          <div className="truncate font-medium text-white">{getProfileDisplayName(student, 'Aluno')}</div>
+                          <div className="truncate text-xs text-muted-foreground">{student.email ?? '—'}</div>
                         </div>
-                        {checked && <Check className="w-4 h-4 text-primary shrink-0" />}
+                        {checked && <Check className="h-4 w-4 shrink-0 text-primary" />}
                       </div>
                     </button>
                   )
@@ -1117,7 +1127,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
                 Fechar
               </Button>
               <Button onClick={() => saveAssignments(assignPanelPlanId)} disabled={savingAssignmentsForPlanId === assignPanelPlanId} className="gap-2">
-                <Save className="w-4 h-4" />
+                <Save className="h-4 w-4" />
                 {savingAssignmentsForPlanId === assignPanelPlanId ? 'Salvando...' : 'Salvar vínculos'}
               </Button>
             </div>
@@ -1126,7 +1136,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
       )}
 
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingSplitId ? 'Editar split' : 'Novo split'}</DialogTitle>
             <DialogDescription>
@@ -1260,7 +1270,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
               Cancelar
             </Button>
             <Button onClick={saveSplit} disabled={formSaving} className="gap-2">
-              <Save className="w-4 h-4" />
+              <Save className="h-4 w-4" />
               {formSaving ? 'Salvando...' : editingSplitId ? 'Salvar alterações' : 'Criar split'}
             </Button>
           </DialogFooter>

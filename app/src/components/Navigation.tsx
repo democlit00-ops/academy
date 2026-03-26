@@ -11,7 +11,6 @@ import {
   Calculator,
   Bandage,
   Share2,
-  Watch,
   BookOpen,
   Users,
   GraduationCap,
@@ -35,9 +34,7 @@ export type Page =
   | 'onerm'
   | 'injuries'
   | 'share'
-  | 'wearables'
   | 'programs'
-  | 'cloud'
   | 'settings'
   | 'admin_exercises'
   | 'admin_users'
@@ -67,7 +64,6 @@ const navItems: NavItem[] = [
   { id: 'programs', label: 'Programas', icon: BookOpen },
   { id: 'injuries', label: 'Lesões', icon: Bandage },
   { id: 'share', label: 'Compartilhar', icon: Share2 },
-  { id: 'wearables', label: 'Wearables', icon: Watch },
   { id: 'history', label: 'Histórico', icon: History },
   { id: 'analysis', label: 'Análise', icon: BarChart3 },
   { id: 'settings', label: 'Config', icon: Settings },
@@ -92,10 +88,7 @@ export function Navigation({
   const role = profile?.role ?? 'user'
   const isStudentMode = !!selectedStudentName
 
-  const visibleItems = navItems.filter((item) => {
-    if (role === 'user' && item.id === 'cloud') return false
-    return true
-  })
+  const visibleItems = navItems
 
   const renderNavButton = (item: NavItem) => {
     const Icon = item.icon
@@ -121,7 +114,6 @@ export function Navigation({
 
   return (
     <>
-      {/* Desktop Sidebar */}
       <aside className="sticky top-0 hidden h-screen w-64 flex-col border-r border-border bg-card lg:flex">
         <div className="p-6">
           <div className="flex items-center gap-3">
@@ -228,7 +220,6 @@ export function Navigation({
         </div>
       </aside>
 
-      {/* Mobile Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-lg lg:hidden">
         <div className="flex items-center justify-around px-2 py-2">
           {visibleItems.slice(0, 5).map((item) => {
@@ -254,7 +245,6 @@ export function Navigation({
         </div>
       </nav>
 
-      {/* Mobile top buttons */}
       <div className="fixed right-4 top-4 z-50 flex items-center gap-2 lg:hidden">
         {isStudentMode && onExitStudentMode && (
           <button

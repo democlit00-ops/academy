@@ -14,6 +14,7 @@ import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { parseLocalDate, getTodayLocalDateString } from '@/lib/date'
 
 interface WorkoutFormProps {
   onSave: (workout: WorkoutSession) => void
@@ -69,6 +70,13 @@ const WEEK_DAYS: WeekDay[] = [
   'Domingo',
 ] as WeekDay[]
 
+
+function getWeekDayFromDateString(date: string): WeekDay {
+  const parsed = parseLocalDate(date)
+  if (!parsed) return 'Segunda'
+  return normalizeWeekDayLabel(format(parsed, 'EEEE', { locale: ptBR }))
+}
+
 function weekDayToNumber(day: WeekDay): number {
   const map: Record<string, number> = {
     Segunda: 1,
@@ -83,9 +91,24 @@ function weekDayToNumber(day: WeekDay): number {
 }
 
 function normalizeWeekDayLabel(value: string): WeekDay {
-  const normalized = value.replace('-feira', '').trim()
-  const capitalized = normalized.charAt(0).toUpperCase() + normalized.slice(1)
-  return (WEEK_DAYS.includes(capitalized as WeekDay) ? capitalized : 'Segunda') as WeekDay
+  const normalized = value
+    .toLowerCase()
+    .replace('-feira', '')
+    .trim()
+
+  const map: Record<string, WeekDay> = {
+    segunda: 'Segunda',
+    terça: 'Terça',
+    terca: 'Terça',
+    quarta: 'Quarta',
+    quinta: 'Quinta',
+    sexta: 'Sexta',
+    sábado: 'Sábado',
+    sabado: 'Sábado',
+    domingo: 'Domingo',
+  }
+
+  return map[normalized] ?? 'Segunda'
 }
 
 function parseRepsToNumber(repsText: string | null): number {
@@ -105,10 +128,8 @@ export function WorkoutForm({
   const isStudentMode = !!selectedUserId
   const targetUserId = selectedUserId || user?.id || null
 
-  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [weekDay, setWeekDay] = useState<WeekDay>(
-    normalizeWeekDayLabel(format(new Date(), 'EEEE', { locale: ptBR }))
-  )
+  const [date, setDate] = useState(getTodayLocalDateString())
+  const [weekDay, setWeekDay] = useState<WeekDay>(getWeekDayFromDateString(getTodayLocalDateString()))
 
   const [exercises, setExercises] = useState<WorkoutExercise[]>([])
   const [loadingPlan, setLoadingPlan] = useState(false)
@@ -166,8 +187,9 @@ export function WorkoutForm({
         if (activeErr) throw activeErr
 
         const activeSplitId = active?.active_split_id ?? null
-        const activeProgramId = active?.active_program_id ?? null
-        setActiveProgramId(activeProgramId)
+        const nextActiveProgramId = active?.active_program_id ?? null
+        setActiveProgramId(nextActiveProgramId)
+
         const weekdayNum = weekDayToNumber(weekDay)
 
         if (activeSplitId) {
@@ -195,7 +217,7 @@ export function WorkoutForm({
           setActiveSplitDay(null)
         }
 
-        if (!activeProgramId) {
+        if (!nextActiveProgramId) {
           setLoadingPlan(false)
           return
         }
@@ -203,7 +225,7 @@ export function WorkoutForm({
         const { data: dayRow, error: dayErr } = await supabase
           .from('plan_days')
           .select('id,weekday,day_title')
-          .eq('plan_id', activeProgramId)
+          .eq('plan_id', nextActiveProgramId)
           .eq('weekday', weekdayNum)
           .maybeSingle()
 
@@ -215,12 +237,10 @@ export function WorkoutForm({
 
         const { data: items, error: itemsErr } = await supabase
           .from('plan_items')
-          .select(
-            `
+          .select(`
             id,block,sets,reps,target_weight,notes,duration_min,sort_order,custom_exercise_name,exercise_id,muscle_group,
             exercises:exercise_id ( name )
-          `
-          )
+          `)
           .eq('plan_day_id', dayRow.id)
           .order('sort_order', { ascending: true })
 
@@ -232,8 +252,7 @@ export function WorkoutForm({
         const mapped: WorkoutExercise[] = strengthItems.map((it) => {
           const exId = it.exercise_id ?? ''
           const exName = it.exercises?.name ?? it.custom_exercise_name ?? 'Exercício'
-          const mg = (it.muscle_group ||
-            (dbExercisesById.get(exId)?.muscle_group ?? 'Peito')) as MuscleGroup
+          const mg = (it.muscle_group || dbExercisesById.get(exId)?.muscle_group || 'Peito') as MuscleGroup
 
           const setsCount = Math.max(it.sets ?? 1, 1)
           const repsN = parseRepsToNumber(it.reps)
@@ -255,11 +274,13 @@ export function WorkoutForm({
           }
         })
 
-        const autoLoadKey = `${targetUserId}:${activeProgramId}:${weekdayNum}`
+        const autoLoadKey = `${targetUserId}:${nextActiveProgramId}:${weekdayNum}`
+
         setExercises((prev) => {
           if (prev.length > 0 && lastAutoLoadedKey !== autoLoadKey) return prev
           return mapped
         })
+
         setLastAutoLoadedKey(autoLoadKey)
       } catch (e: any) {
         toast.error(e?.message ?? 'Erro ao carregar treino do dia do programa ativo.')
@@ -269,7 +290,7 @@ export function WorkoutForm({
     }
 
     void loadPlanForDay()
-  }, [targetUserId, date, weekDay, dbExercisesById, lastAutoLoadedKey])
+  }, [targetUserId, weekDay, dbExercisesById, lastAutoLoadedKey])
 
   const addExercise = () => {
     const newExercise: WorkoutExercise = {
@@ -345,9 +366,24 @@ export function WorkoutForm({
     }
   }
 
+  const handleDateChange = (value: string) => {
+    setDate(value)
+    setWeekDay(getWeekDayFromDateString(value))
+    setLastAutoLoadedKey(null)
+  }
+
   const todaySplitGroups = (activeSplitDay?.muscle_groups ?? []).filter(Boolean)
-  const isSplitRestDay = !!activeSplitDay && todaySplitGroups.length === 0 && (activeSplitDay.day_title ?? '').toLowerCase().includes('descanso')
-  const canSuggestFromSplit = !activeProgramId && !!activeSplitDay && !isSplitRestDay && todaySplitGroups.length > 0 && exercises.length === 0
+  const isSplitRestDay =
+    !!activeSplitDay &&
+    todaySplitGroups.length === 0 &&
+    (activeSplitDay.day_title ?? '').toLowerCase().includes('descanso')
+
+  const canSuggestFromSplit =
+    !activeProgramId &&
+    !!activeSplitDay &&
+    !isSplitRestDay &&
+    todaySplitGroups.length > 0 &&
+    exercises.length === 0
 
   const applySplitSuggestions = () => {
     if (!canSuggestFromSplit) return
@@ -395,10 +431,15 @@ export function WorkoutForm({
     }
 
     onSave(workout)
-    toast.success(activeProgramId ? 'Treino salvo! O histórico já pode ser usado no progresso do programa.' : 'Treino salvo com sucesso!')
+    toast.success(
+      activeProgramId
+        ? 'Treino salvo! O histórico já pode ser usado no progresso do programa.'
+        : 'Treino salvo com sucesso!'
+    )
 
-    setDate(format(new Date(), 'yyyy-MM-dd'))
-    setWeekDay(normalizeWeekDayLabel(format(new Date(), 'EEEE', { locale: ptBR })))
+    const today = getTodayLocalDateString()
+    setDate(today)
+    setWeekDay(getWeekDayFromDateString(today))
     setExercises([])
     setLastAutoLoadedKey(null)
   }
@@ -446,15 +487,19 @@ export function WorkoutForm({
           <CardContent className="pt-6">
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge className="bg-primary/20 text-primary border-primary/30">Split ativo</Badge>
+                <Badge className="border-primary/30 bg-primary/20 text-primary">Split ativo</Badge>
                 <h3 className="text-base font-semibold text-white">{activeSplit.title}</h3>
                 <Badge variant="outline">{activeSplit.visibility === 'public' ? 'Público' : 'Privado'}</Badge>
               </div>
 
               <div>
                 <div className="text-sm text-muted-foreground">Foco de hoje</div>
-                <div className="text-white font-medium">
-                  {activeSplitDay ? (isSplitRestDay ? 'Descanso' : (activeSplitDay.day_title || 'Treino do dia')) : 'Nenhum dia configurado para hoje'}
+                <div className="font-medium text-white">
+                  {activeSplitDay
+                    ? isSplitRestDay
+                      ? 'Descanso'
+                      : (activeSplitDay.day_title || 'Treino do dia')
+                    : 'Nenhum dia configurado para hoje'}
                 </div>
               </div>
 
@@ -482,7 +527,7 @@ export function WorkoutForm({
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30">Sugestão do split</Badge>
+                  <Badge className="border-blue-500/30 bg-blue-500/20 text-blue-300">Sugestão do split</Badge>
                 </div>
                 <p className="text-sm text-blue-100">
                   Não há programa ativo para este dia. Posso montar um rascunho de treino com base no <strong>split ativo</strong>.
@@ -503,25 +548,26 @@ export function WorkoutForm({
         </Card>
       )}
 
-      <Card className="bg-card border-border">
+      <Card className="border-border bg-card">
         <CardHeader>
-          <CardTitle className="text-white flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-white">
             <Dumbbell className="w-5 h-5 text-primary" />
             Informações do Treino
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="date">Data</Label>
               <Input
                 id="date"
                 type="date"
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={(e) => handleDateChange(e.target.value)}
                 className="bg-background border-border"
               />
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="weekDay">Dia da Semana</Label>
               <Select value={weekDay} onValueChange={(v) => setWeekDay(v as WeekDay)}>
@@ -555,9 +601,9 @@ export function WorkoutForm({
         </div>
 
         {exercises.length === 0 && (
-          <Card className="bg-card border-border border-dashed">
+          <Card className="border-border border-dashed bg-card">
             <CardContent className="py-8 text-center">
-              <Dumbbell className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <Dumbbell className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
               <p className="text-muted-foreground">
                 Nenhum exercício adicionado. Clique no botão acima para começar.
               </p>
@@ -566,7 +612,7 @@ export function WorkoutForm({
         )}
 
         {exercises.map((exercise, exIndex) => (
-          <Card key={exercise.id} className="bg-card border-border">
+          <Card key={exercise.id} className="border-border bg-card">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base text-white">Exercício {exIndex + 1}</CardTitle>
@@ -580,6 +626,7 @@ export function WorkoutForm({
                 </Button>
               </div>
             </CardHeader>
+
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Exercício</Label>
@@ -605,7 +652,7 @@ export function WorkoutForm({
                 <div className="space-y-2">
                   {exercise.sets.map((set, setIndex) => (
                     <div key={setIndex} className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground w-12">Série {setIndex + 1}</span>
+                      <span className="w-12 text-sm text-muted-foreground">Série {setIndex + 1}</span>
                       <Input
                         type="number"
                         placeholder="Reps"
@@ -639,13 +686,14 @@ export function WorkoutForm({
                     </div>
                   ))}
                 </div>
+
                 <Button variant="outline" size="sm" onClick={() => addSet(exercise.id)} className="mt-2">
-                  <Plus className="w-4 h-4 mr-1" />
+                  <Plus className="mr-1 h-4 w-4" />
                   Adicionar Série
                 </Button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label>RPE (1-10): {exercise.rpe}</Label>
                   <Slider
@@ -656,6 +704,7 @@ export function WorkoutForm({
                     step={1}
                   />
                 </div>
+
                 <div className="space-y-2">
                   <Label>FC Média (bpm)</Label>
                   <Input
@@ -670,6 +719,7 @@ export function WorkoutForm({
                     className="bg-background border-border"
                   />
                 </div>
+
                 <div className="space-y-2">
                   <Label>FC Máxima (bpm)</Label>
                   <Input

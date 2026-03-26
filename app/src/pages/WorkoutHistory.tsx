@@ -11,17 +11,18 @@ import { LineChart } from '@/components/charts'
 import type { WorkoutSession, WeekDay, MuscleGroup, WorkoutExercise } from '@/types'
 import { MUSCLE_GROUPS } from '@/data/exercises'
 import { calculateWorkoutVolume, calculateExerciseProgress, formatWeight } from '@/lib/calculations'
-import { format, parseISO, startOfDay, endOfDay } from 'date-fns'
+import { format, startOfDay, endOfDay } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { parseLocalDate, formatLocalDate } from '@/lib/date'
 
 type DbWorkoutSession = {
   id: string
   user_id: string
-  session_date: string // yyyy-mm-dd
+  session_date: string
   weekday: number
   total_volume: number
-  exercises: any // jsonb (array)
+  exercises: any
   created_at: string
 }
 
@@ -50,6 +51,7 @@ function coerceNumber(v: any, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
+
 function mapDbToWorkoutSession(row: DbWorkoutSession): WorkoutSession {
   const exercisesRaw = Array.isArray(row.exercises) ? row.exercises : []
 
@@ -59,7 +61,10 @@ function mapDbToWorkoutSession(row: DbWorkoutSession): WorkoutSession {
     exerciseName: ex.exerciseName ?? ex.name ?? '',
     muscleGroup: (ex.muscleGroup ?? 'Peito') as MuscleGroup,
     sets: Array.isArray(ex.sets)
-      ? ex.sets.map((s: any) => ({ reps: coerceNumber(s.reps, 0), weight: coerceNumber(s.weight, 0) }))
+      ? ex.sets.map((s: any) => ({
+          reps: coerceNumber(s.reps, 0),
+          weight: coerceNumber(s.weight, 0),
+        }))
       : [{ reps: 0, weight: 0 }],
     rpe: coerceNumber(ex.rpe, 7),
     avgHeartRate: ex.avgHeartRate ?? undefined,
@@ -96,13 +101,11 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
 
-  // Proteção simples: se tentar ver outro user sem ser coach/admin, não busca
   const canViewTarget =
     !!user &&
-    (!!effectiveUserId) &&
+    !!effectiveUserId &&
     (effectiveUserId === user.id || role === 'coach' || role === 'admin')
 
-  // 1) carregar lista de exercícios (para filtro)
   useEffect(() => {
     const loadExercises = async () => {
       try {
@@ -118,10 +121,10 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
         setDbExercises([])
       }
     }
+
     void loadExercises()
   }, [])
 
-  // 2) carregar histórico do supabase (do user alvo)
   useEffect(() => {
     if (!user) return
 
@@ -153,7 +156,6 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
     void loadWorkouts()
   }, [user, effectiveUserId, canViewTarget])
 
-  // Filtrar treinos
   const filteredWorkouts = useMemo(() => {
     return workouts
       .filter((workout) => {
@@ -168,20 +170,24 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
         }
 
         if (startDate || endDate) {
-          const workoutDate = parseISO(workout.date)
-          const start = startDate ? startOfDay(parseISO(startDate)) : null
-          const end = endDate ? endOfDay(parseISO(endDate)) : null
+          const workoutDate = parseLocalDate(workout.date)
+          const start = startDate ? startOfDay(parseLocalDate(startDate) ?? new Date('invalid')) : null
+          const end = endDate ? endOfDay(parseLocalDate(endDate) ?? new Date('invalid')) : null
 
+          if (!workoutDate) return false
           if (start && workoutDate < start) return false
           if (end && workoutDate > end) return false
         }
 
         return true
       })
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .sort((a, b) => {
+        const da = parseLocalDate(a.date)?.getTime() ?? 0
+        const db = parseLocalDate(b.date)?.getTime() ?? 0
+        return db - da
+      })
   }, [workouts, selectedMuscleGroup, selectedExercise, startDate, endDate])
 
-  // Dados para gráfico de evolução
   const progressData = useMemo(() => {
     if (selectedExercise === 'all') return []
 
@@ -190,13 +196,12 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
 
     return progress[0].history.map((h) => ({
       date: h.date,
-      label: format(new Date(h.date), 'dd/MM'),
+      label: formatLocalDate(h.date, (d) => format(d, 'dd/MM')),
       maxWeight: h.maxWeight,
       volume: h.totalVolume,
     }))
   }, [workouts, selectedExercise])
 
-  // Estatísticas
   const stats = useMemo(() => {
     const totalWorkouts = filteredWorkouts.length
     const totalVolume = filteredWorkouts.reduce((sum, w) => sum + calculateWorkoutVolume(w), 0)
@@ -211,7 +216,6 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
     setEndDate('')
   }
 
-  // Se não tiver permissão para ver o alvo
   if (user && effectiveUserId && !canViewTarget) {
     return (
       <div className="space-y-2">
@@ -223,7 +227,6 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
 
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Histórico de Treinos</h1>
@@ -233,41 +236,42 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
         </div>
       </div>
 
-      {/* Estatísticas */}
       <div className="grid grid-cols-3 gap-4">
         <Card className="bg-card border-border">
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Total de Treinos</p>
+            <p className="mb-1 text-xs text-muted-foreground">Total de Treinos</p>
             <p className="text-2xl font-bold text-white">{stats.totalWorkouts}</p>
           </CardContent>
         </Card>
+
         <Card className="bg-card border-border">
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Volume Total</p>
+            <p className="mb-1 text-xs text-muted-foreground">Volume Total</p>
             <p className="text-2xl font-bold text-white">
               {(stats.totalVolume / 1000).toFixed(1)}k
-              <span className="text-sm font-normal text-muted-foreground ml-1">kg</span>
+              <span className="ml-1 text-sm font-normal text-muted-foreground">kg</span>
             </p>
           </CardContent>
         </Card>
+
         <Card className="bg-card border-border">
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Volume Médio</p>
+            <p className="mb-1 text-xs text-muted-foreground">Volume Médio</p>
             <p className="text-2xl font-bold text-white">{formatWeight(stats.avgVolume)}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Filtros */}
       <Card className="bg-card border-border">
         <CardHeader>
-          <CardTitle className="text-white text-base flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-base text-white">
             <Filter className="w-4 h-4" />
             Filtros
           </CardTitle>
         </CardHeader>
+
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label className="text-sm text-muted-foreground">Grupo Muscular</Label>
               <Select value={selectedMuscleGroup} onValueChange={setSelectedMuscleGroup}>
@@ -330,15 +334,15 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
         </CardContent>
       </Card>
 
-      {/* Gráfico */}
       {selectedExercise !== 'all' && progressData.length > 0 && (
         <Card className="bg-card border-border">
           <CardHeader>
-            <CardTitle className="text-white text-base flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 text-base text-white">
               <TrendingUp className="w-4 h-4 text-primary" />
               Evolução do Exercício
             </CardTitle>
           </CardHeader>
+
           <CardContent>
             <LineChart
               data={progressData}
@@ -354,14 +358,14 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
         </Card>
       )}
 
-      {/* Lista */}
       <Card className="bg-card border-border">
         <CardHeader>
-          <CardTitle className="text-white text-base flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-base text-white">
             <Calendar className="w-4 h-4 text-primary" />
             Treinos ({filteredWorkouts.length})
           </CardTitle>
         </CardHeader>
+
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
@@ -374,10 +378,14 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
                   <TableHead className="text-muted-foreground">RPE Médio</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
                 {filteredWorkouts.map((workout) => (
                   <TableRow key={workout.id} className="border-border">
-                    <TableCell className="text-white">{format(new Date(workout.date), 'dd/MM/yyyy')}</TableCell>
+                    <TableCell className="text-white">
+                      {formatLocalDate(workout.date, (d) => format(d, 'dd/MM/yyyy'))}
+                    </TableCell>
+
                     <TableCell className="text-muted-foreground">{workout.weekDay}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
@@ -392,7 +400,10 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
                     <TableCell>
                       {workout.exercises.length > 0 ? (
                         <span className="text-white">
-                          {(workout.exercises.reduce((sum, ex) => sum + ex.rpe, 0) / workout.exercises.length).toFixed(1)}
+                          {(
+                            workout.exercises.reduce((sum, ex) => sum + (Number.isFinite(ex.rpe) ? ex.rpe : 0), 0) /
+                            workout.exercises.length
+                          ).toFixed(1)}
                         </span>
                       ) : (
                         '-'
@@ -403,7 +414,7 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
 
                 {!loading && filteredWorkouts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                       Nenhum treino encontrado com os filtros selecionados
                     </TableCell>
                   </TableRow>
@@ -411,7 +422,7 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
 
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                       Carregando histórico...
                     </TableCell>
                   </TableRow>

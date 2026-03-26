@@ -33,6 +33,7 @@ import { ptBR } from 'date-fns/locale';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { parseLocalDate, formatLocalDate } from '@/lib/date'
 
 interface DashboardProps {
   workouts: WorkoutSession[];
@@ -89,6 +90,7 @@ function weekdayNumberToLabel(weekday?: number | null): WeekDay {
   return map[weekday ?? 1] ?? 'Segunda';
 }
 
+
 export function Dashboard({
   workouts,
   cardio,
@@ -121,11 +123,7 @@ export function Dashboard({
       setDashboardLoading(true);
 
       try {
-        const [
-          workoutsResult,
-          cardioResult,
-          physioResult,
-        ] = await Promise.all([
+        const [workoutsResult, cardioResult, physioResult] = await Promise.all([
           supabase
             .from('workout_sessions')
             .select('id,user_id,session_date,weekday,total_volume,exercises,created_at')
@@ -218,6 +216,7 @@ export function Dashboard({
   const effectiveWorkouts = isStudentMode ? dbWorkouts : workouts;
   const effectiveCardio = isStudentMode ? dbCardio : cardio;
   const effectivePhysio = isStudentMode ? dbPhysio : physio;
+
   const effectiveRecoveryScores = useMemo(() => {
     if (isStudentMode) {
       return effectivePhysio.map((p) => calculateRecoveryScore(p));
@@ -236,10 +235,14 @@ export function Dashboard({
   const strengthProgressData = useMemo(() => {
     const progress = calculateExerciseProgress(effectiveWorkouts);
     const topExercises = progress.slice(0, 3);
-    const dates = [...new Set(effectiveWorkouts.map((w) => w.date))].sort();
+    const dates = [...new Set(effectiveWorkouts.map((w) => w.date))].sort((a, b) => {
+      const da = parseLocalDate(a)?.getTime() ?? 0;
+      const db = parseLocalDate(b)?.getTime() ?? 0;
+      return da - db;
+    });
 
     return dates.map((date) => {
-      const point: Record<string, any> = { date, label: format(new Date(date), 'dd/MM') };
+      const point: Record<string, any> = { date, label: formatLocalDate(date, (d) => format(d, 'dd/MM')) };
       topExercises.forEach((ex) => {
         const dayData = ex.history.find((h) => h.date === date);
         point[ex.exerciseName] = dayData?.maxWeight || 0;
@@ -263,30 +266,37 @@ export function Dashboard({
       const weekStart = startOfWeek(date, { weekStartsOn: 1 });
       return {
         week: format(weekStart, 'dd/MM'),
+        weekStart,
         minutes: 0,
         distance: 0,
       };
     }).reverse();
 
     effectiveCardio.forEach((session) => {
-      const sessionDate = new Date(session.date);
-      const weekData = last4Weeks.find((w) => {
-        const weekDate = new Date(w.week.split('/').reverse().join('-'));
-        return isSameWeek(sessionDate, weekDate, { weekStartsOn: 1 });
-      });
+      const sessionDate = parseLocalDate(session.date);
+      if (!sessionDate) return;
+
+      const weekData = last4Weeks.find((w) =>
+        isSameWeek(sessionDate, w.weekStart, { weekStartsOn: 1 })
+      );
+
       if (weekData) {
         weekData.minutes += session.duration;
         weekData.distance += session.distance || 0;
       }
     });
 
-    return last4Weeks;
+    return last4Weeks.map(({ week, minutes, distance }) => ({
+      week,
+      minutes,
+      distance,
+    }));
   }, [effectiveCardio]);
 
   const recoveryData = useMemo(() => {
     return effectiveRecoveryScores.slice(-7).map((r) => ({
       date: r.date,
-      label: format(new Date(r.date), 'dd/MM'),
+      label: formatLocalDate(r.date, (d) => format(d, 'dd/MM')),
       score: r.score,
     }));
   }, [effectiveRecoveryScores]);
@@ -301,7 +311,10 @@ export function Dashboard({
     });
 
     effectiveWorkouts.forEach((workout) => {
-      if (new Date(workout.date) >= oneWeekAgo) {
+      const workoutDate = parseLocalDate(workout.date);
+      if (!workoutDate) return;
+
+      if (workoutDate >= oneWeekAgo) {
         workout.exercises.forEach((ex) => {
           const volume = calculateExerciseVolume(ex);
           muscleVolumes[ex.muscleGroup] = (muscleVolumes[ex.muscleGroup] || 0) + volume;
@@ -320,20 +333,29 @@ export function Dashboard({
 
   const weeklyWorkouts = useMemo(() => {
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-    return effectiveWorkouts.filter((w) => new Date(w.date) >= weekStart).length;
+    return effectiveWorkouts.filter((w) => {
+      const workoutDate = parseLocalDate(w.date);
+      return workoutDate ? workoutDate >= weekStart : false;
+    }).length;
   }, [effectiveWorkouts]);
 
   const weeklyVolume = useMemo(() => {
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
     return effectiveWorkouts
-      .filter((w) => new Date(w.date) >= weekStart)
+      .filter((w) => {
+        const workoutDate = parseLocalDate(w.date);
+        return workoutDate ? workoutDate >= weekStart : false;
+      })
       .reduce((total, w) => total + calculateWorkoutVolume(w), 0);
   }, [effectiveWorkouts]);
 
   const weeklyCardioMinutes = useMemo(() => {
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
     return effectiveCardio
-      .filter((c) => new Date(c.date) >= weekStart)
+      .filter((c) => {
+        const cardioDate = parseLocalDate(c.date);
+        return cardioDate ? cardioDate >= weekStart : false;
+      })
       .reduce((total, c) => total + c.duration, 0);
   }, [effectiveCardio]);
 
