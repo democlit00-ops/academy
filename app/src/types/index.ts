@@ -1,5 +1,5 @@
 // ============================================
-// TIPOS DO SISTEMA FITTRACK PRO
+// TIPOS DO SISTEMA AcademyK PRO
 // ============================================
 
 // Grupos musculares

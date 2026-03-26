@@ -81,7 +81,7 @@ export function Settings({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Configurações</h1>
-          <p className="text-muted-foreground">Personalize o FitTrack Pro</p>
+          <p className="text-muted-foreground">Personalize o AcademyK</p>
         </div>
       </div>
 
@@ -345,8 +345,8 @@ export function Settings({
         </CardHeader>
         <CardContent>
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p><strong className="text-white">FitTrack Pro</strong> v1.0</p>
-            <p>Sistema completo para controle de treino de academia e análise fisiológica.</p>
+            <p><strong className="text-white">AcademyK</strong> v1.0</p>
+            <p>Plataforma completa para controle de treino, cardio, análise fisiológica e acompanhamento de alunos.</p>
             <p>Desenvolvido por Kito Biten.</p>
           </div>
         </CardContent>

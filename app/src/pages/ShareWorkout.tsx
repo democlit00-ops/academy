@@ -225,7 +225,7 @@ export function ShareWorkout({
             .join('')}
 
           <text x="80" y="1260" fill="rgba(255,255,255,0.52)" font-size="24" font-family="Arial">
-            Compartilhado via FitTrack
+            Compartilhado via AcademyK
           </text>
         </svg>
       `
@@ -398,7 +398,7 @@ ${selectedWorkout.exercises
                 <div className="space-y-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-xs uppercase tracking-[0.22em] text-white/60">FitTrack</p>
+                      <p className="text-xs uppercase tracking-[0.22em] text-white/60">AcademyK</p>
                       <h2 className="mt-2 text-2xl font-bold">Treino {selectedWorkout.weekDay}</h2>
                       <p className="mt-1 text-sm text-white/70">{formatDateSafe(selectedWorkout.date)}</p>
                     </div>
@@ -464,7 +464,7 @@ ${selectedWorkout.exercises
                   </div>
 
                   <div className="text-center text-xs text-white/45">
-                    Compartilhado via FitTrack
+                    Compartilhado via AcademyK
                   </div>
                 </div>
               </div>
@@ -496,7 +496,7 @@ ${selectedWorkout.exercises
 🏋️ ${selectedWorkout.exercises.length} exercícios
 🔥 ${totalSets} séries
 
-#fitness #academia #treino #fittrack`}
+#fitness #academia #treino #academyk`}
               </p>
             </div>
 

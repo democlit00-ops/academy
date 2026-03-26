@@ -122,7 +122,7 @@ export function Navigation({
             </div>
 
             <div>
-              <h1 className="text-lg font-bold text-white">FitTrack</h1>
+              <h1 className="text-lg font-bold text-white">AcademyK</h1>
               <p className="text-xs text-muted-foreground">
                 {role === 'admin' ? 'Admin' : role === 'coach' ? 'Professor' : 'Pro'}
               </p>
@@ -209,7 +209,7 @@ export function Navigation({
           <div className="rounded-lg bg-muted p-4">
             <p className="mb-2 text-xs text-muted-foreground">Versão</p>
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium text-white">FitTrack Pro v1.0</p>
+              <p className="text-sm font-medium text-white">AcademyK v2.0</p>
               {isStudentMode && (
                 <Badge variant="secondary" className="text-[10px]">
                   Aluno
