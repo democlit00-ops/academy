@@ -197,7 +197,11 @@ export default function AuthPage() {
     <div className="min-h-screen bg-[#081225] text-white flex items-center justify-center p-4">
       <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/[0.04] p-8 shadow-2xl backdrop-blur-sm">
         <div className="mb-8 text-center space-y-2">
-          <div className="text-3xl font-semibold tracking-tight">AcademyK</div>
+          <img
+  src="/academyk-logo.png"
+  alt="AcademyK"
+  className="h-12 w-auto mx-auto"
+/>
           <div className="text-sm text-white/65">
             {inviteMode ? 'Finalize seu cadastro para entrar no AcademyK com o convite recebido.' : 'Entre para acessar sua conta e salvar seus dados.'}
           </div>
