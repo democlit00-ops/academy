@@ -49,6 +49,12 @@ type StudentModeBadgeProps = {
   onExit: () => void;
 };
 
+type CoachProfileRow = {
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
+};
+
 function StudentModeBadge({ student, onExit }: StudentModeBadgeProps) {
   if (!student) return null;
 
@@ -100,6 +106,7 @@ function MainApp() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [selectedStudentName, setSelectedStudentName] = useState('');
+  const [linkedCoachName, setLinkedCoachName] = useState<string | null>(null);
 
   useEffect(() => {
     const adminPages: Page[] = ['admin_exercises', 'admin_users'];
@@ -119,6 +126,57 @@ function MainApp() {
       toast.error('Sem permissão para acessar esta área.');
     }
   }, [currentPage, role]);
+
+  useEffect(() => {
+    const loadLinkedCoachName = async () => {
+      if (!user?.id) {
+        setLinkedCoachName(null);
+        return;
+      }
+
+      try {
+        const { data: link, error: linkError } = await supabase
+          .from('coach_students')
+          .select('coach_id')
+          .eq('student_id', user.id)
+          .maybeSingle();
+
+        if (linkError) throw linkError;
+
+        if (!link?.coach_id) {
+          setLinkedCoachName(null);
+          return;
+        }
+
+        const { data: coachProfile, error: coachError } = await supabase
+          .from('profiles')
+          .select('full_name,email,role')
+          .eq('id', link.coach_id)
+          .maybeSingle();
+
+        if (coachError) throw coachError;
+
+        const coach = (coachProfile ?? null) as CoachProfileRow | null;
+
+        if (!coach) {
+          setLinkedCoachName(null);
+          return;
+        }
+
+        const coachName =
+          coach.full_name?.trim() ||
+          coach.email?.trim() ||
+          null;
+
+        setLinkedCoachName(coachName);
+      } catch (e: unknown) {
+        console.error('Erro ao carregar professor vinculado:', e);
+        setLinkedCoachName(null);
+      }
+    };
+
+    void loadLinkedCoachName();
+  }, [user?.id]);
 
   const {
     workoutSessions,
@@ -346,22 +404,22 @@ function MainApp() {
         );
 
       case 'workout':
-  return (
-    <WorkoutForm
-      onSave={handleSaveWorkout}
-      selectedUserId={null}
-      selectedUserLabel={null}
-    />
-  );
+        return (
+          <WorkoutForm
+            onSave={handleSaveWorkout}
+            selectedUserId={null}
+            selectedUserLabel={null}
+          />
+        );
 
-     case 'cardio':
-  return (
-    <CardioForm
-      onSave={handleSaveCardio}
-      selectedUserId={null}
-      selectedUserLabel={null}
-    />
-  );
+      case 'cardio':
+        return (
+          <CardioForm
+            onSave={handleSaveCardio}
+            selectedUserId={null}
+            selectedUserLabel={null}
+          />
+        );
 
       case 'loads':
         return (
@@ -437,7 +495,6 @@ function MainApp() {
           />
         );
 
-      
       case 'admin_exercises':
         return role === 'admin' ? <AdminExercises /> : null;
 
@@ -463,7 +520,7 @@ function MainApp() {
             onSaveSettings={handleSaveSettings}
             onClearData={handleClearData}
             onRequestPasswordReset={handleRequestPasswordReset}
-            coachName={null}
+            coachName={linkedCoachName}
           />
         );
 
@@ -526,10 +583,7 @@ export default function App() {
       const pathname = window.location.pathname.toLowerCase();
       const fullUrl = `${pathname}${search}${hash}`.toLowerCase();
 
-      const looksLikeRecovery =
-        fullUrl.includes('type=recovery') ||
-        fullUrl.includes('access_token=') ||
-        fullUrl.includes('refresh_token=');
+      const looksLikeRecovery = fullUrl.includes('type=recovery');
 
       if (looksLikeRecovery || pathname === '/reset-password') {
         setIsRecoveryMode(true);
@@ -539,7 +593,10 @@ export default function App() {
       const { data } = await supabase.auth.getSession();
       if (pathname === '/reset-password' && data.session) {
         setIsRecoveryMode(true);
+        return;
       }
+
+      setIsRecoveryMode(false);
     };
 
     void checkRecoveryMode();
@@ -547,6 +604,18 @@ export default function App() {
     const { data: listener } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecoveryMode(true);
+        return;
+      }
+
+      if (event === 'SIGNED_IN') {
+        const pathname = window.location.pathname.toLowerCase();
+
+        if (pathname === '/reset-password') {
+          setIsRecoveryMode(true);
+          return;
+        }
+
+        setIsRecoveryMode(false);
       }
     });
 

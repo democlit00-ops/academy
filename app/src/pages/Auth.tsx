@@ -146,7 +146,7 @@ export default function AuthPage() {
     setLoading(true)
     setMessage(null)
     try {
-      const redirectTo = `${window.location.origin}/signup?invite=${resolvedInviteCode}`
+      const redirectTo = `${window.location.origin}/login`
 
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
