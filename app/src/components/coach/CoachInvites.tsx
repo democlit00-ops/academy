@@ -1,3 +1,4 @@
+//academy\app\src\components\coach\CoachInvites.tsx
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Copy, Link2, Mail, RefreshCw, Trash2, UserPlus } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'

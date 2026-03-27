@@ -90,13 +90,23 @@ export default function AuthPage() {
           return
         }
 
-        if (parsed.status !== 'pending') {
-          setInviteMessage('Este convite não está mais disponível.')
+        if (parsed.status === 'used') {
+          setInviteMessage('Este convite já foi utilizado. Faça login para continuar.')
           return
         }
 
-        if (isInviteExpired(parsed.expires_at)) {
+        if (parsed.status === 'cancelled') {
+          setInviteMessage('Este convite foi cancelado.')
+          return
+        }
+
+        if (parsed.status === 'expired' || isInviteExpired(parsed.expires_at)) {
           setInviteMessage('Este convite expirou.')
+          return
+        }
+
+        if (parsed.status !== 'pending') {
+          setInviteMessage('Este convite não está mais disponível.')
           return
         }
 
@@ -122,6 +132,7 @@ export default function AuthPage() {
         email: email.trim(),
         password,
       })
+
       if (error) throw error
     } catch (e: any) {
       setMessage(e?.message ?? 'Erro ao entrar')
@@ -159,7 +170,9 @@ export default function AuthPage() {
 
       if (error) throw error
 
-      setMessage('Conta criada com sucesso. Verifique seu email e clique no link de confirmação para ativar o acesso. Depois do primeiro login, o sistema concluirá automaticamente o vínculo com o professor.')
+      setMessage(
+        'Conta criada com sucesso. Verifique seu email e clique no link de confirmação para ativar o acesso. Depois do primeiro login, o sistema concluirá automaticamente o vínculo com o professor.'
+      )
     } catch (e: any) {
       setMessage(e?.message ?? 'Erro ao cadastrar com convite')
     } finally {
@@ -191,19 +204,24 @@ export default function AuthPage() {
     }
   }
 
-  const inviteIsUsable = !!invite && invite.status === 'pending' && !isInviteExpired(invite.expires_at)
+  const inviteIsUsable =
+    !!invite &&
+    invite.status === 'pending' &&
+    !isInviteExpired(invite.expires_at)
 
   return (
     <div className="min-h-screen bg-[#081225] text-white flex items-center justify-center p-4">
       <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/[0.04] p-8 shadow-2xl backdrop-blur-sm">
         <div className="mb-8 text-center space-y-2">
           <img
-  src="/academyk-logo.png"
-  alt="AcademyK"
-  className="h-12 w-auto mx-auto"
-/>
+            src="/academyk-logo.png"
+            alt="AcademyK"
+            className="h-12 w-auto mx-auto"
+          />
           <div className="text-sm text-white/65">
-            {inviteMode ? 'Finalize seu cadastro para entrar no AcademyK com o convite recebido.' : 'Entre para acessar sua conta e salvar seus dados.'}
+            {inviteMode
+              ? 'Finalize seu cadastro para entrar no AcademyK com o convite recebido.'
+              : 'Entre para acessar sua conta e salvar seus dados.'}
           </div>
         </div>
 
@@ -223,7 +241,9 @@ export default function AuthPage() {
                 )}
               </div>
             ) : (
-              <div className="text-sm text-amber-200">{inviteMessage ?? 'Este convite não está disponível.'}</div>
+              <div className="text-sm text-amber-200">
+                {inviteMessage ?? 'Este convite não está disponível.'}
+              </div>
             )}
           </div>
         )}
@@ -266,41 +286,42 @@ export default function AuthPage() {
               />
             </div>
           )}
-        </div>
 
-        {message && <div className="mt-5 text-sm text-amber-200 text-center">{message}</div>}
+          {message && (
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-center text-white/85">
+              {message}
+            </div>
+          )}
 
-        <div className="mt-7 grid grid-cols-1 gap-3">
-          {!inviteMode && (
-            <>
+          <div className="space-y-3">
+            {inviteMode ? (
               <button
-                disabled={!canSubmit || loading || password.length < 6}
-                onClick={handleSignIn}
-                className="rounded-2xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 px-4 py-3 font-medium transition-colors"
+                onClick={handleInviteSignUp}
+                disabled={loading || !inviteIsUsable}
+                className="w-full rounded-2xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 px-4 py-3 font-medium transition"
               >
-                Entrar (Email + Senha)
+                {loading ? 'Criando conta...' : 'Criar conta com convite'}
               </button>
-
+            ) : (
               <button
-                type="button"
-                disabled={!canSubmit || loading}
+                onClick={handleSignIn}
+                disabled={loading || !canSubmit}
+                className="w-full rounded-2xl bg-cyan-700 hover:bg-cyan-600 disabled:opacity-50 px-4 py-3 font-medium transition"
+              >
+                {loading ? 'Entrando...' : 'Entrar (Email + Senha)'}
+              </button>
+            )}
+
+            {!inviteMode && (
+              <button
                 onClick={handleForgotPassword}
-                className="text-sm text-cyan-300 hover:text-cyan-200 transition-colors"
+                disabled={loading || !canSubmit}
+                className="w-full text-sm text-cyan-300 hover:text-cyan-200 transition"
               >
                 Esqueci minha senha
               </button>
-            </>
-          )}
-
-          {inviteMode && (
-            <button
-              disabled={!canSubmit || loading || password.length < 6 || !passwordsMatch || !inviteIsUsable}
-              onClick={handleInviteSignUp}
-              className="rounded-2xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 px-4 py-3 font-medium transition-colors"
-            >
-              Criar conta com convite
-            </button>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

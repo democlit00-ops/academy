@@ -16,6 +16,8 @@ type CoachInviteRow = {
   email: string | null
   status: 'pending' | 'used' | 'cancelled' | 'expired'
   expires_at: string | null
+  used_by_user_id?: string | null
+  used_at?: string | null
 }
 
 type CoachLimitRow = {
@@ -82,7 +84,7 @@ export const handler: Handler = async (event) => {
 
     const { data: invite, error: inviteError } = await admin
       .from('coach_invites')
-      .select('id, coach_id, code, email, status, expires_at')
+      .select('id, coach_id, code, email, status, expires_at, used_by_user_id, used_at')
       .eq('code', inviteCode)
       .maybeSingle()
 
@@ -94,6 +96,43 @@ export const handler: Handler = async (event) => {
 
     if (!typedInvite) {
       return json(404, { error: 'Invite not found.' })
+    }
+
+    const { data: existingLink, error: existingLinkError } = await admin
+      .from('coach_students')
+      .select('coach_id, student_id')
+      .eq('coach_id', typedInvite.coach_id)
+      .eq('student_id', userId)
+      .maybeSingle()
+
+    if (existingLinkError) {
+      return json(500, { error: existingLinkError.message })
+    }
+
+    const alreadyLinked = Boolean(existingLink)
+
+    if (typedInvite.status === 'used') {
+      const usedBySameUser = typedInvite.used_by_user_id === userId
+
+      if (alreadyLinked || usedBySameUser) {
+        return json(200, {
+          ok: true,
+          alreadyLinked: true,
+          alreadyConsumed: true,
+          coachId: typedInvite.coach_id,
+          userId,
+        })
+      }
+
+      return json(400, { error: 'Invite already used by another user.' })
+    }
+
+    if (typedInvite.status === 'cancelled') {
+      return json(400, { error: 'Invite cancelled.' })
+    }
+
+    if (typedInvite.status === 'expired') {
+      return json(400, { error: 'Invite expired.' })
     }
 
     if (typedInvite.status !== 'pending') {
@@ -113,18 +152,7 @@ export const handler: Handler = async (event) => {
       return json(400, { error: 'Invite email does not match.' })
     }
 
-    const { data: existingLink, error: existingLinkError } = await admin
-      .from('coach_students')
-      .select('coach_id, student_id')
-      .eq('coach_id', typedInvite.coach_id)
-      .eq('student_id', userId)
-      .maybeSingle()
-
-    if (existingLinkError) {
-      return json(500, { error: existingLinkError.message })
-    }
-
-    if (existingLink) {
+    if (alreadyLinked) {
       await admin
         .from('coach_invites')
         .update({
@@ -135,7 +163,12 @@ export const handler: Handler = async (event) => {
         })
         .eq('id', typedInvite.id)
 
-      return json(200, { ok: true, alreadyLinked: true })
+      return json(200, {
+        ok: true,
+        alreadyLinked: true,
+        coachId: typedInvite.coach_id,
+        userId,
+      })
     }
 
     const [{ data: limitRow, error: limitError }, { data: coachLinks, error: coachLinksError }] = await Promise.all([

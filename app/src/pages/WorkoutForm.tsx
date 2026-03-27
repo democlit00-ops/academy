@@ -15,6 +15,7 @@ import { ptBR } from 'date-fns/locale'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { parseLocalDate, getTodayLocalDateString } from '@/lib/date'
+import { ExercisePicker, type ExercisePickerOption } from '@/components/exercises/ExercisePicker'
 
 interface WorkoutFormProps {
   onSave: (workout: WorkoutSession) => void
@@ -26,7 +27,11 @@ type DbExercise = {
   id: string
   name: string
   muscle_group: string
+  category: 'Força' | 'Cardio' | 'Core' | 'Mobilidade'
   type: 'strength' | 'cardio'
+  equipment?: string | null
+  aliases?: string[] | null
+  notes?: string | null
   is_active: boolean
 }
 
@@ -60,6 +65,8 @@ type DbSplitDay = {
   muscle_groups: string[] | null
 }
 
+type ExerciseSourceMode = 'bank' | 'custom'
+
 const WEEK_DAYS: WeekDay[] = [
   'Segunda',
   'Terça',
@@ -69,7 +76,6 @@ const WEEK_DAYS: WeekDay[] = [
   'Sábado',
   'Domingo',
 ] as WeekDay[]
-
 
 function getWeekDayFromDateString(date: string): WeekDay {
   const parsed = parseLocalDate(date)
@@ -119,6 +125,36 @@ function parseRepsToNumber(repsText: string | null): number {
   return Number.isFinite(n) ? n : 10
 }
 
+function normalizeMuscleGroup(value?: string | null): MuscleGroup {
+  const raw = String(value ?? '').trim().toLowerCase()
+
+  const map: Record<string, MuscleGroup> = {
+    peito: 'Peito',
+    costas: 'Costas',
+    ombros: 'Ombros',
+    bíceps: 'Bíceps',
+    biceps: 'Bíceps',
+    tríceps: 'Tríceps',
+    triceps: 'Tríceps',
+    pernas: 'Pernas',
+    glúteos: 'Glúteos',
+    gluteos: 'Glúteos',
+    posterior: 'Posterior',
+    core: 'Core',
+    cardio: 'Cardio',
+    mobilidade: 'Mobilidade',
+    cervical: 'Mobilidade',
+    panturrilhas: 'Pernas',
+    adutores: 'Pernas',
+  }
+
+  return map[raw] ?? 'Peito'
+}
+
+function inferSourceMode(exercise: WorkoutExercise) {
+  return exercise.sourceMode ?? (exercise.exerciseId ? 'bank' : 'custom')
+}
+
 export function WorkoutForm({
   onSave,
   selectedUserId,
@@ -126,7 +162,7 @@ export function WorkoutForm({
 }: WorkoutFormProps) {
   const { user } = useAuth()
   const isStudentMode = !!selectedUserId
-  const targetUserId = selectedUserId || user?.id || null
+  const targetUserId = user?.id || null
 
   const [date, setDate] = useState(getTodayLocalDateString())
   const [weekDay, setWeekDay] = useState<WeekDay>(getWeekDayFromDateString(getTodayLocalDateString()))
@@ -139,6 +175,22 @@ export function WorkoutForm({
   const [activeSplit, setActiveSplit] = useState<DbSplitPlan | null>(null)
   const [activeSplitDay, setActiveSplitDay] = useState<DbSplitDay | null>(null)
 
+  const exercisePickerOptions = useMemo<ExercisePickerOption[]>(
+  () =>
+    dbExercises.map((exercise) => ({
+      id: exercise.id,
+      name: exercise.name,
+      muscle_group: exercise.muscle_group,
+      category: exercise.category,
+      type: exercise.type,
+      equipment: exercise.equipment ?? null,
+      aliases: exercise.aliases ?? [],
+      notes: exercise.notes ?? null,
+      is_active: exercise.is_active,
+    })),
+  [dbExercises]
+)
+
   const dbExercisesById = useMemo(() => {
     const map = new Map<string, DbExercise>()
     dbExercises.forEach((e) => map.set(e.id, e))
@@ -150,7 +202,7 @@ export function WorkoutForm({
       try {
         const { data, error } = await supabase
           .from('exercises')
-          .select('id,name,muscle_group,type,is_active')
+          .select('id,name,muscle_group,category,type,equipment,aliases,notes,is_active')
           .eq('is_active', true)
           .order('name', { ascending: true })
 
@@ -252,7 +304,7 @@ export function WorkoutForm({
         const mapped: WorkoutExercise[] = strengthItems.map((it) => {
           const exId = it.exercise_id ?? ''
           const exName = it.exercises?.name ?? it.custom_exercise_name ?? 'Exercício'
-          const mg = (it.muscle_group || dbExercisesById.get(exId)?.muscle_group || 'Peito') as MuscleGroup
+          const mg = normalizeMuscleGroup(it.muscle_group || dbExercisesById.get(exId)?.muscle_group || 'Peito')
 
           const setsCount = Math.max(it.sets ?? 1, 1)
           const repsN = parseRepsToNumber(it.reps)
@@ -294,13 +346,14 @@ export function WorkoutForm({
 
   const addExercise = () => {
     const newExercise: WorkoutExercise = {
-      id: crypto.randomUUID(),
-      exerciseId: '',
-      exerciseName: '',
-      muscleGroup: 'Peito' as MuscleGroup,
-      sets: [{ reps: 10, weight: 0 }],
-      rpe: 7,
-    }
+  id: crypto.randomUUID(),
+  exerciseId: '',
+  exerciseName: '',
+  muscleGroup: 'Peito' as MuscleGroup,
+  sourceMode: 'bank',
+  sets: [{ reps: 10, weight: 0 }],
+  rpe: 7,
+}
     setExercises([...exercises, newExercise])
   }
 
@@ -356,15 +409,44 @@ export function WorkoutForm({
   }
 
   const handleExerciseSelect = (exerciseId: string, workoutExerciseId: string) => {
-    const ex = dbExercisesById.get(exerciseId)
-    if (ex) {
-      updateExercise(workoutExerciseId, {
-        exerciseId: ex.id,
-        exerciseName: ex.name,
-        muscleGroup: (ex.muscle_group as MuscleGroup) ?? ('Peito' as MuscleGroup),
-      })
-    }
+  const ex = dbExercisesById.get(exerciseId)
+  if (ex) {
+    updateExercise(workoutExerciseId, {
+      sourceMode: 'bank',
+      exerciseId: ex.id,
+      exerciseName: ex.name,
+      muscleGroup: normalizeMuscleGroup(ex.muscle_group),
+    })
   }
+}
+
+  const handleCustomExerciseNameChange = (workoutExerciseId: string, exerciseName: string) => {
+  updateExercise(workoutExerciseId, {
+    sourceMode: 'custom',
+    exerciseId: '',
+    exerciseName,
+  })
+}
+
+  const handleSourceModeChange = (workoutExerciseId: string, mode: ExerciseSourceMode) => {
+  const current = exercises.find((exercise) => exercise.id === workoutExerciseId)
+  if (!current) return
+
+  if (mode === 'bank') {
+    updateExercise(workoutExerciseId, {
+      sourceMode: 'bank',
+      exerciseId: '',
+      exerciseName: '',
+    })
+    return
+  }
+
+  updateExercise(workoutExerciseId, {
+    sourceMode: 'custom',
+    exerciseId: '',
+    exerciseName: current.exerciseName || '',
+  })
+}
 
   const handleDateChange = (value: string) => {
     setDate(value)
@@ -397,7 +479,7 @@ export function WorkoutForm({
         id: crypto.randomUUID(),
         exerciseId: matchedExercise?.id ?? '',
         exerciseName: matchedExercise?.name ?? '',
-        muscleGroup: group as MuscleGroup,
+        muscleGroup: normalizeMuscleGroup(group),
         sets: [{ reps: 10, weight: 0 }],
         rpe: 7,
         notes: `Sugestão do split: ${group}`,
@@ -414,8 +496,8 @@ export function WorkoutForm({
       return
     }
 
-    if (exercises.some((e) => !e.exerciseId && !e.exerciseName)) {
-      toast.error('Selecione todos os exercícios')
+    if (exercises.some((e) => !e.exerciseId && !e.exerciseName.trim())) {
+      toast.error('Selecione ou preencha todos os exercícios')
       return
     }
 
@@ -611,143 +693,199 @@ export function WorkoutForm({
           </Card>
         )}
 
-        {exercises.map((exercise, exIndex) => (
-          <Card key={exercise.id} className="border-border bg-card">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base text-white">Exercício {exIndex + 1}</CardTitle>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeExercise(exercise.id)}
-                  className="text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </div>
-            </CardHeader>
+        {exercises.map((exercise, exIndex) => {
+          const sourceMode = inferSourceMode(exercise)
 
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Exercício</Label>
-                <Select
-                  value={exercise.exerciseId}
-                  onValueChange={(v) => handleExerciseSelect(v, exercise.id)}
-                >
-                  <SelectTrigger className="bg-background border-border">
-                    <SelectValue placeholder="Selecione um exercício" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-64">
-                    {dbExercises.map((ex) => (
-                      <SelectItem key={ex.id} value={ex.id}>
-                        {ex.name} ({ex.muscle_group})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          return (
+            <Card key={exercise.id} className="border-border bg-card">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base text-white">Exercício {exIndex + 1}</CardTitle>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeExercise(exercise.id)}
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              </CardHeader>
 
-              <div className="space-y-2">
-                <Label>Séries</Label>
-                <div className="space-y-2">
-                  {exercise.sets.map((set, setIndex) => (
-                    <div key={setIndex} className="flex items-center gap-2">
-                      <span className="w-12 text-sm text-muted-foreground">Série {setIndex + 1}</span>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  <Label>Origem do exercício</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant={sourceMode === 'bank' ? 'default' : 'outline'}
+                      onClick={() => handleSourceModeChange(exercise.id, 'bank')}
+                    >
+                      Usar banco de exercícios
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={sourceMode === 'custom' ? 'default' : 'outline'}
+                      onClick={() => handleSourceModeChange(exercise.id, 'custom')}
+                    >
+                      Exercício personalizado
+                    </Button>
+                  </div>
+                </div>
+
+                {sourceMode === 'bank' ? (
+                  <div className="space-y-2">
+                    <Label>Exercício</Label>
+                    <ExercisePicker
+                      options={exercisePickerOptions}
+                      value={exercise.exerciseId || null}
+                      onValueChange={(exerciseId) => handleExerciseSelect(exerciseId, exercise.id)}
+                      placeholder="Buscar por nome, grupo, equipamento..."
+                    />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>Nome do exercício</Label>
                       <Input
-                        type="number"
-                        placeholder="Reps"
-                        value={set.reps || ''}
-                        onChange={(e) =>
-                          updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
-                        }
-                        className="w-20 bg-background border-border"
+                        value={exercise.exerciseName || ''}
+                        onChange={(e) => handleCustomExerciseNameChange(exercise.id, e.target.value)}
+                        placeholder="Ex: Dead bug com pausa"
+                        className="bg-background border-border"
                       />
-                      <span className="text-muted-foreground">x</span>
-                      <Input
-                        type="number"
-                        placeholder="Kg"
-                        value={set.weight || ''}
-                        onChange={(e) =>
-                          updateSet(exercise.id, setIndex, { weight: parseFloat(e.target.value) || 0 })
-                        }
-                        className="w-24 bg-background border-border"
-                      />
-                      <span className="text-muted-foreground">kg</span>
-                      {exercise.sets.length > 1 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeSet(exercise.id, setIndex)}
-                          className="text-destructive"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      )}
                     </div>
-                  ))}
+
+                    <div className="space-y-2">
+                      <Label>Grupo muscular</Label>
+                      <Select
+                        value={exercise.muscleGroup}
+                        onValueChange={(value) =>
+                          updateExercise(exercise.id, { muscleGroup: value as MuscleGroup })
+                        }
+                      >
+                        <SelectTrigger className="bg-background border-border">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Peito">Peito</SelectItem>
+                          <SelectItem value="Costas">Costas</SelectItem>
+                          <SelectItem value="Ombros">Ombros</SelectItem>
+                          <SelectItem value="Bíceps">Bíceps</SelectItem>
+                          <SelectItem value="Tríceps">Tríceps</SelectItem>
+                          <SelectItem value="Pernas">Pernas</SelectItem>
+                          <SelectItem value="Glúteos">Glúteos</SelectItem>
+                          <SelectItem value="Posterior">Posterior</SelectItem>
+                          <SelectItem value="Core">Core</SelectItem>
+                          <SelectItem value="Cardio">Cardio</SelectItem>
+                          <SelectItem value="Mobilidade">Mobilidade</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Séries</Label>
+                  <div className="space-y-2">
+                    {exercise.sets.map((set, setIndex) => (
+                      <div key={setIndex} className="flex items-center gap-2">
+                        <span className="w-12 text-sm text-muted-foreground">Série {setIndex + 1}</span>
+                        <Input
+                          type="number"
+                          placeholder="Reps"
+                          value={set.reps || ''}
+                          onChange={(e) =>
+                            updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
+                          }
+                          className="w-20 bg-background border-border"
+                        />
+                        <span className="text-muted-foreground">x</span>
+                        <Input
+                          type="number"
+                          placeholder="Kg"
+                          value={set.weight || ''}
+                          onChange={(e) =>
+                            updateSet(exercise.id, setIndex, { weight: parseFloat(e.target.value) || 0 })
+                          }
+                          className="w-24 bg-background border-border"
+                        />
+                        <span className="text-muted-foreground">kg</span>
+                        {exercise.sets.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeSet(exercise.id, setIndex)}
+                            className="text-destructive"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button variant="outline" size="sm" onClick={() => addSet(exercise.id)} className="mt-2">
+                    <Plus className="mr-1 h-4 w-4" />
+                    Adicionar Série
+                  </Button>
                 </div>
 
-                <Button variant="outline" size="sm" onClick={() => addSet(exercise.id)} className="mt-2">
-                  <Plus className="mr-1 h-4 w-4" />
-                  Adicionar Série
-                </Button>
-              </div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>RPE (1-10): {exercise.rpe}</Label>
+                    <Slider
+                      value={[exercise.rpe]}
+                      onValueChange={([v]) => updateExercise(exercise.id, { rpe: v })}
+                      min={1}
+                      max={10}
+                      step={1}
+                    />
+                  </div>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>RPE (1-10): {exercise.rpe}</Label>
-                  <Slider
-                    value={[exercise.rpe]}
-                    onValueChange={([v]) => updateExercise(exercise.id, { rpe: v })}
-                    min={1}
-                    max={10}
-                    step={1}
-                  />
+                  <div className="space-y-2">
+                    <Label>FC Média (bpm)</Label>
+                    <Input
+                      type="number"
+                      placeholder="Opcional"
+                      value={exercise.avgHeartRate || ''}
+                      onChange={(e) =>
+                        updateExercise(exercise.id, {
+                          avgHeartRate: parseInt(e.target.value) || undefined,
+                        })
+                      }
+                      className="bg-background border-border"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>FC Máxima (bpm)</Label>
+                    <Input
+                      type="number"
+                      placeholder="Opcional"
+                      value={exercise.maxHeartRate || ''}
+                      onChange={(e) =>
+                        updateExercise(exercise.id, {
+                          maxHeartRate: parseInt(e.target.value) || undefined,
+                        })
+                      }
+                      className="bg-background border-border"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>FC Média (bpm)</Label>
+                  <Label>Observações</Label>
                   <Input
-                    type="number"
-                    placeholder="Opcional"
-                    value={exercise.avgHeartRate || ''}
-                    onChange={(e) =>
-                      updateExercise(exercise.id, {
-                        avgHeartRate: parseInt(e.target.value) || undefined,
-                      })
-                    }
+                    placeholder="Notas sobre o exercício..."
+                    value={exercise.notes || ''}
+                    onChange={(e) => updateExercise(exercise.id, { notes: e.target.value })}
                     className="bg-background border-border"
                   />
                 </div>
-
-                <div className="space-y-2">
-                  <Label>FC Máxima (bpm)</Label>
-                  <Input
-                    type="number"
-                    placeholder="Opcional"
-                    value={exercise.maxHeartRate || ''}
-                    onChange={(e) =>
-                      updateExercise(exercise.id, {
-                        maxHeartRate: parseInt(e.target.value) || undefined,
-                      })
-                    }
-                    className="bg-background border-border"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Observações</Label>
-                <Input
-                  placeholder="Notas sobre o exercício..."
-                  value={exercise.notes || ''}
-                  onChange={(e) => updateExercise(exercise.id, { notes: e.target.value })}
-                  className="bg-background border-border"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
 
       {exercises.length > 0 && (

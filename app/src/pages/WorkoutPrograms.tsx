@@ -37,6 +37,7 @@ import {
 import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { ExercisePicker, type ExercisePickerOption } from '@/components/exercises/ExercisePicker'
 
 type Role = 'admin' | 'coach' | 'user'
 type ProgramDifficulty = 'Iniciante' | 'Intermediário' | 'Avançado'
@@ -128,8 +129,11 @@ type ExerciseRow = {
   id: string
   name: string
   muscle_group: string | null
-  movement_type: string | null
+  category: string | null
+  type: string | null
   equipment: string | null
+  aliases?: string[] | null
+  notes?: string | null
   is_active?: boolean | null
 }
 
@@ -177,7 +181,7 @@ function deriveMetaFromTitle(
 ): Pick<ProgramUI, 'duration' | 'sessionsPerWeek' | 'difficulty' | 'goal' | 'image'> {
   const t = title.toLowerCase()
   if (t.includes('hipertrofia')) return { duration: '8 semanas', sessionsPerWeek: 3, difficulty: 'Intermediário', goal: 'Hipertrofia', image: '💪' }
-  if (t.includes('5x5') || t.includes('força')) return { duration: '12 semanas', sessionsPerWeek: 3, difficulty: 'Intermediário', goal: 'Força', image: '🏋️' }
+  if (t.includes('5x5') || t.includes('força') || t.includes('forca')) return { duration: '12 semanas', sessionsPerWeek: 3, difficulty: 'Intermediário', goal: 'Força', image: '🏋️' }
   if (t.includes('hiit') || t.includes('emagrecimento')) return { duration: '6 semanas', sessionsPerWeek: 4, difficulty: 'Avançado', goal: 'Emagrecimento', image: '🔥' }
   if (t.includes('iniciante') || t.includes('full body')) return { duration: '4 semanas', sessionsPerWeek: 3, difficulty: 'Iniciante', goal: 'Condicionamento', image: '🌱' }
   return { duration: '—', sessionsPerWeek: 0, difficulty: 'Intermediário', goal: 'Programa', image: '📘' }
@@ -284,6 +288,22 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     [exerciseOptions, newItemForm.selectedExerciseId]
   )
 
+  const exercisePickerOptions = useMemo<ExercisePickerOption[]>(
+    () =>
+      exerciseOptions.map((exercise) => ({
+        id: exercise.id,
+        name: exercise.name,
+        muscle_group: exercise.muscle_group,
+        category: exercise.category,
+        type: exercise.type,
+        equipment: exercise.equipment,
+        aliases: exercise.aliases ?? [],
+        notes: exercise.notes ?? null,
+        is_active: exercise.is_active ?? true,
+      })),
+    [exerciseOptions]
+  )
+
   const rawToday = new Date().toLocaleDateString('pt-BR', { weekday: 'long' })
   const normalizedToday = rawToday.replace('-feira', '').trim()
   const todayLabel = normalizedToday.charAt(0).toUpperCase() + normalizedToday.slice(1)
@@ -295,7 +315,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
 
     const { data, error } = await supabase
       .from('exercises')
-      .select('id,name,muscle_group,is_active')
+      .select('id,name,muscle_group,category,type,equipment,aliases,notes,is_active')
       .eq('is_active', true)
       .order('name', { ascending: true })
 
@@ -305,13 +325,21 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       id: string
       name: string
       muscle_group: string | null
+      category: string | null
+      type: string | null
+      equipment: string | null
+      aliases?: string[] | null
+      notes?: string | null
       is_active?: boolean | null
     }>).map((exercise) => ({
       id: exercise.id,
       name: exercise.name,
       muscle_group: exercise.muscle_group ?? null,
-      movement_type: null,
-      equipment: null,
+      category: exercise.category ?? null,
+      type: exercise.type ?? null,
+      equipment: exercise.equipment ?? null,
+      aliases: exercise.aliases ?? [],
+      notes: exercise.notes ?? null,
       is_active: exercise.is_active ?? true,
     }))
 
@@ -1298,14 +1326,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         : [`${item.sets ?? 0} séries`, item.reps ? `${item.reps} reps` : null].filter(Boolean).join(' • ')
 
                       return (
-                        <div
-                          key={item.id}
-                          className="rounded-lg border border-border/60 bg-background/40 px-3 py-2"
-                        >
+                        <div key={item.id} className="rounded-lg border border-border/60 bg-background/40 px-3 py-2">
                           <div className="text-sm font-medium text-white">{exerciseName}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {meta || 'Sem configuração definida'}
-                          </div>
+                          <div className="text-xs text-muted-foreground">{meta || 'Sem configuração definida'}</div>
                         </div>
                       )
                     })}
@@ -1511,27 +1534,21 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         {newItemForm.exerciseSourceMode === 'existing' ? (
                           <div className="space-y-2">
                             <Label>Exercício</Label>
-                            <select
-                              className="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-white"
-                              value={newItemForm.selectedExerciseId}
-                              onChange={(e) => setNewItemForm((prev) => ({ ...prev, selectedExerciseId: e.target.value }))}
-                            >
-                              <option value="">Selecione um exercício</option>
-                              {exerciseOptions.map((exercise) => (
-                                <option key={exercise.id} value={exercise.id}>
-                                  {exercise.name}
-                                  {exercise.muscle_group ? ` • ${exercise.muscle_group}` : ''}
-                                  {exercise.equipment ? ` • ${exercise.equipment}` : ''}
-                                </option>
-                              ))}
-                            </select>
+                            <ExercisePicker
+                              options={exercisePickerOptions}
+                              value={newItemForm.selectedExerciseId || null}
+                              onValueChange={(exerciseId) =>
+                                setNewItemForm((prev) => ({ ...prev, selectedExerciseId: exerciseId }))
+                              }
+                              placeholder="Buscar por nome, categoria, grupo, equipamento..."
+                            />
 
                             {selectedExercise ? (
                               <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
                                 <div><strong className="text-white">{selectedExercise.name}</strong></div>
                                 <div>
-                                  {selectedExercise.muscle_group ?? 'Grupo não informado'}
-                                  {selectedExercise.movement_type ? ` • ${selectedExercise.movement_type}` : ''}
+                                  {selectedExercise.category ?? 'Sem categoria'}
+                                  {selectedExercise.muscle_group ? ` • ${selectedExercise.muscle_group}` : ''}
                                   {selectedExercise.equipment ? ` • ${selectedExercise.equipment}` : ''}
                                 </div>
                               </div>
@@ -1586,7 +1603,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         </div>
 
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" onClick={() => { setOpenNewItemDayId(null); setNewItemForm(emptyNewItemForm()) }}>Cancelar</Button>
+                          <Button variant="outline" onClick={() => { setOpenNewItemDayId(null); setNewItemForm(emptyNewItemForm()) }}>
+                            Cancelar
+                          </Button>
                           <Button onClick={() => void handleSaveNewItem(day.id)} disabled={savingNewItemDayId === day.id}>
                             {savingNewItemDayId === day.id ? 'Salvando...' : 'Salvar item'}
                           </Button>
@@ -1606,32 +1625,51 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <Badge variant={isCardio ? 'secondary' : 'outline'}>{isCardio ? 'Cardio' : 'Força'}</Badge>
+                                    <Badge variant={isCardio ? 'secondary' : 'outline'}>
+                                      {isCardio ? 'Cardio' : 'Força'}
+                                    </Badge>
                                     <span className="font-medium text-white">{name}</span>
-                                    {item.exercise_id ? <Badge variant="outline" className="text-xs">Banco de exercícios</Badge> : <Badge variant="outline" className="text-xs">Customizado</Badge>}
+                                    {item.exercise_id ? (
+                                      <Badge variant="outline" className="text-xs">Banco de exercícios</Badge>
+                                    ) : (
+                                      <Badge variant="outline" className="text-xs">Customizado</Badge>
+                                    )}
                                   </div>
 
                                   <div className="mt-2 text-sm text-muted-foreground">
                                     {isCardio ? (
                                       <>
                                         Duração: <strong>{item.duration_min ?? 0} min</strong>
-                                        {item.zone_min_bpm || item.zone_max_bpm ? <> • Zona: <strong>{item.zone_min_bpm ?? '-'} - {item.zone_max_bpm ?? '-'} bpm</strong></> : null}
+                                        {item.zone_min_bpm || item.zone_max_bpm ? (
+                                          <> • Zona: <strong>{item.zone_min_bpm ?? '-'} - {item.zone_max_bpm ?? '-'} bpm</strong></>
+                                        ) : null}
                                       </>
                                     ) : (
                                       <>
                                         Séries: <strong>{item.sets ?? 0}</strong> • Reps: <strong>{item.reps ?? '-'}</strong>
-                                        {item.target_weight ? <> • Carga alvo: <strong>{item.target_weight} kg</strong></> : null}
+                                        {item.target_weight ? (
+                                          <> • Carga alvo: <strong>{item.target_weight} kg</strong></>
+                                        ) : null}
                                       </>
                                     )}
                                   </div>
 
                                   {item.notes ? (
-                                    <div className="mt-2 text-sm text-muted-foreground">Observações: <span className="text-white/90">{item.notes}</span></div>
+                                    <div className="mt-2 text-sm text-muted-foreground">
+                                      Observações: <span className="text-white/90">{item.notes}</span>
+                                    </div>
                                   ) : null}
                                 </div>
 
-                                <Button variant="outline" size="sm" className="gap-2" onClick={() => void handleDeleteItem(item.id)} disabled={deletingItemId === item.id}>
-                                  <Trash2 className="h-4 w-4" />{deletingItemId === item.id ? 'Removendo...' : 'Remover'}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="gap-2"
+                                  onClick={() => void handleDeleteItem(item.id)}
+                                  disabled={deletingItemId === item.id}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  {deletingItemId === item.id ? 'Removendo...' : 'Remover'}
                                 </Button>
                               </div>
                             </div>
@@ -1653,3 +1691,5 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     </div>
   )
 }
+
+export default WorkoutPrograms

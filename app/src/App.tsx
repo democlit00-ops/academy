@@ -110,74 +110,68 @@ function MainApp() {
   const [linkedCoachName, setLinkedCoachName] = useState<string | null>(null);
 
   useEffect(() => {
-    const adminPages: Page[] = ['admin_exercises', 'admin_users'];
-    const coachPages: Page[] = ['coach_students'];
-
-    const isAdminPage = adminPages.includes(currentPage);
-    const isCoachPage = coachPages.includes(currentPage);
-
-    if (isAdminPage && role !== 'admin') {
-      setCurrentPage('dashboard');
-      toast.error('Sem permissão para acessar esta área.');
+  const loadLinkedCoachName = async () => {
+    if (!user?.id) {
+      console.log('[linkedCoach] sem user.id');
+      setLinkedCoachName(null);
       return;
     }
 
-    if (isCoachPage && role !== 'coach' && role !== 'admin') {
-      setCurrentPage('dashboard');
-      toast.error('Sem permissão para acessar esta área.');
-    }
-  }, [currentPage, role]);
+    try {
+      console.log('[linkedCoach] user.id:', user.id);
 
-  useEffect(() => {
-    const loadLinkedCoachName = async () => {
-      if (!user?.id) {
+      const { data: link, error: linkError } = await supabase
+        .from('coach_students')
+        .select('coach_id')
+        .eq('student_id', user.id)
+        .maybeSingle();
+
+      console.log('[linkedCoach] coach_students result:', link);
+      console.log('[linkedCoach] coach_students error:', linkError);
+
+      if (linkError) throw linkError;
+
+      if (!link?.coach_id) {
+        console.log('[linkedCoach] nenhum coach_id encontrado');
         setLinkedCoachName(null);
         return;
       }
 
-      try {
-        const { data: link, error: linkError } = await supabase
-          .from('coach_students')
-          .select('coach_id')
-          .eq('student_id', user.id)
-          .maybeSingle();
+      const { data: coachProfile, error: coachError } = await supabase
+        .from('profiles')
+        .select('full_name,email,role')
+        .eq('id', link.coach_id)
+        .maybeSingle();
 
-        if (linkError) throw linkError;
+      console.log('[linkedCoach] profiles result:', coachProfile);
+      console.log('[linkedCoach] profiles error:', coachError);
 
-        if (!link?.coach_id) {
-          setLinkedCoachName(null);
-          return;
-        }
+      if (coachError) throw coachError;
 
-        const { data: coachProfile, error: coachError } = await supabase
-          .from('profiles')
-          .select('full_name,email,role')
-          .eq('id', link.coach_id)
-          .maybeSingle();
+      const coach = (coachProfile ?? null) as CoachProfileRow | null;
 
-        if (coachError) throw coachError;
-
-        const coach = (coachProfile ?? null) as CoachProfileRow | null;
-
-        if (!coach) {
-          setLinkedCoachName(null);
-          return;
-        }
-
-        const coachName =
-          coach.full_name?.trim() ||
-          coach.email?.trim() ||
-          null;
-
-        setLinkedCoachName(coachName);
-      } catch (e: unknown) {
-        console.error('Erro ao carregar professor vinculado:', e);
+      if (!coach) {
+        console.log('[linkedCoach] perfil do coach não encontrado');
         setLinkedCoachName(null);
+        return;
       }
-    };
 
-    void loadLinkedCoachName();
-  }, [user?.id]);
+      const coachName =
+        coach.full_name?.trim() ||
+        coach.email?.trim() ||
+        null;
+
+      console.log('[linkedCoach] coachName final:', coachName);
+      setLinkedCoachName(coachName);
+    } catch (e: unknown) {
+      console.error('[linkedCoach] erro:', e);
+      setLinkedCoachName(null);
+    }
+  };
+
+  void loadLinkedCoachName();
+}, [user?.id]);
+
 
   const {
     workoutSessions,
@@ -515,15 +509,16 @@ function MainApp() {
         ) : null;
 
       case 'settings':
-        return (
-          <Settings
-            settings={settings}
-            onSaveSettings={handleSaveSettings}
-            onClearData={handleClearData}
-            onRequestPasswordReset={handleRequestPasswordReset}
-            coachName={linkedCoachName}
-          />
-        );
+  console.log('[settings] linkedCoachName:', linkedCoachName);
+  return (
+    <Settings
+      settings={settings}
+      onSaveSettings={handleSaveSettings}
+      onClearData={handleClearData}
+      onRequestPasswordReset={handleRequestPasswordReset}
+      coachName={linkedCoachName}
+    />
+  );
 
       default:
         return (
