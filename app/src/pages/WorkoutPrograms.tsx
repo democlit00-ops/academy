@@ -1,3 +1,5 @@
+//academy\app\src\pages\WorkoutPrograms.tsx
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   BookOpen,
@@ -38,6 +40,8 @@ import { toast } from 'sonner'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { ExercisePicker, type ExercisePickerOption } from '@/components/exercises/ExercisePicker'
+import { ExerciseHelpMenu } from '@/components/exercises/ExerciseHelpMenu'
+import { getTodayLocalDateString } from '@/lib/date'
 
 type Role = 'admin' | 'coach' | 'user'
 type ProgramDifficulty = 'Iniciante' | 'Intermediário' | 'Avançado'
@@ -151,6 +155,36 @@ type NewItemForm = {
   notes: string
 }
 
+
+
+type WorkoutSessionExerciseLite = {
+  exerciseId?: string | null
+  exerciseName?: string | null
+}
+
+type DbInjuryRow = {
+  id: string
+  user_id: string
+  body_part: string
+  description: string
+  severity: number
+  date_started: string
+  date_recovered: string | null
+  status: 'active' | 'recovered' | 'chronic'
+  notes: string | null
+  affected_exercises: string[] | null
+  created_at: string
+  updated_at: string
+}
+
+type InjuryAlert = {
+  id: string
+  bodyPart: string
+  description: string
+  severity: number
+  status: 'active' | 'chronic'
+}
+
 interface WorkoutProgramsProps {
   selectedUserId?: string | null
   selectedUserLabel?: string | null
@@ -208,6 +242,72 @@ function mapPlanToProgramUI(plan: DbPlan, source: ProgramSource): ProgramUI {
   }
 }
 
+function normalizeProgressKey(value?: string | null) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function normalizeInjuryKey(value?: string | null) {
+  return normalizeProgressKey(value)
+}
+
+function getInjuryAliases(bodyPart: string) {
+  const key = normalizeInjuryKey(bodyPart)
+
+  const aliasMap: Record<string, string[]> = {
+    peito: ['peito'],
+    costas: ['costas', 'lombar'],
+    ombro: ['ombro', 'deltoide'],
+    'ombro (articulacao)': ['ombro', 'deltoide', 'peito', 'triceps'],
+    biceps: ['biceps'],
+    triceps: ['triceps'],
+    quadriceps: ['quadriceps', 'joelho', 'perna'],
+    posteriores: ['posteriores', 'isquiotibiais', 'perna'],
+    gluteos: ['gluteos', 'quadril'],
+    panturrilhas: ['panturrilhas', 'tornozelo'],
+    abdomen: ['abdomen', 'core', 'lombar'],
+    joelho: ['joelho', 'quadriceps', 'posteriores', 'gluteos', 'panturrilhas', 'perna'],
+    cotovelo: ['cotovelo', 'biceps', 'triceps', 'antebraco'],
+    pulso: ['pulso', 'antebraco'],
+    quadril: ['quadril', 'gluteos', 'posteriores', 'adutores'],
+    tornozelo: ['tornozelo', 'panturrilhas'],
+    lombar: ['lombar', 'costas', 'abdomen', 'core'],
+    cervical: ['cervical', 'ombro', 'costas'],
+  }
+
+  return aliasMap[key] ?? [key]
+}
+
+function itemConflictsWithInjuries(item: DbPlanItem, injuries: InjuryAlert[]) {
+  const exerciseName = normalizeInjuryKey(item.exercise_name || item.custom_exercise_name || '')
+  const muscleGroup = normalizeInjuryKey(item.muscle_group || '')
+  const combined = `${exerciseName} ${muscleGroup}`
+
+  return injuries.filter((injury) => {
+    const aliases = getInjuryAliases(injury.bodyPart)
+    return aliases.some((alias) => alias && combined.includes(alias))
+  })
+}
+
+function openWorkoutPageFromProgram(programId: string) {
+  localStorage.setItem(
+    'academy:openWorkoutFromProgram',
+    JSON.stringify({
+      programId,
+      ts: Date.now(),
+    })
+  )
+
+  window.dispatchEvent(
+    new CustomEvent('academy:open-workout-from-program', {
+      detail: { programId },
+    })
+  )
+}
+
 const emptyProgramForm = (): ProgramFormState => ({
   title: '',
   description: '',
@@ -248,6 +348,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const [details, setDetails] = useState<Record<string, { days: (DbPlanDay & { items: DbPlanItem[] })[] }>>({})
   const [activeProgramDays, setActiveProgramDays] = useState<DbPlanDay[]>([])
   const [activeProgramItems, setActiveProgramItems] = useState<Record<string, DbPlanItem[]>>({})
+  const [completedTodayKeys, setCompletedTodayKeys] = useState<string[]>([])
+  const [injuryAlerts, setInjuryAlerts] = useState<InjuryAlert[]>([])
+  const [injuryLoading, setInjuryLoading] = useState(false)
 
   const [students, setStudents] = useState<ProfileStudentRow[]>([])
   const [planStudentIds, setPlanStudentIds] = useState<Record<string, string[]>>({})
@@ -277,12 +380,6 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     return role === 'coach' || role === 'admin'
   }, [user, targetUserId, role])
 
-  const progress = useMemo(() => activeProgram ? ({
-    week: 1,
-    day: 1,
-    completed: Array(Math.max(activeProgram.sessionsPerWeek, 1)).fill(false) as boolean[],
-  }) : null, [activeProgram])
-
   const selectedExercise = useMemo(
     () => exerciseOptions.find((exercise) => exercise.id === newItemForm.selectedExerciseId) ?? null,
     [exerciseOptions, newItemForm.selectedExerciseId]
@@ -309,6 +406,108 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const todayLabel = normalizedToday.charAt(0).toUpperCase() + normalizedToday.slice(1)
   const todayProgramDay = activeProgramDays.find((day) => weekdayLabel(day.weekday) === todayLabel)
   const todayProgramExercises = todayProgramDay ? (activeProgramItems[todayProgramDay.id] ?? []) : []
+
+  const progress = useMemo(() => {
+    const total = todayProgramExercises.length
+    const completed = todayProgramExercises.filter((item) => {
+      const exerciseName = item.exercise_name || item.custom_exercise_name || ''
+      const keys = [
+        normalizeProgressKey(item.exercise_id),
+        normalizeProgressKey(exerciseName),
+      ].filter(Boolean)
+
+      return keys.some((key) => completedTodayKeys.includes(key))
+    }).length
+
+    return {
+      completed,
+      total,
+      percent: total > 0 ? (completed / total) * 100 : 0,
+      isComplete: total > 0 && completed >= total,
+    }
+  }, [todayProgramExercises, completedTodayKeys])
+
+  const todayInjuryConflicts = useMemo(() => {
+    return todayProgramExercises
+      .map((item) => ({
+        itemId: item.id,
+        conflicts: itemConflictsWithInjuries(item, injuryAlerts),
+      }))
+      .filter((entry) => entry.conflicts.length > 0)
+  }, [todayProgramExercises, injuryAlerts])
+
+  const hasTodayInjuryConflicts = todayInjuryConflicts.length > 0
+
+  const loadCompletedTodayProgress = useCallback(async () => {
+    if (!targetUserId) {
+      setCompletedTodayKeys([])
+      return
+    }
+
+    try {
+      const today = getTodayLocalDateString()
+      const { data, error } = await supabase
+        .from('workout_sessions')
+        .select('exercises')
+        .eq('user_id', targetUserId)
+        .eq('session_date', today)
+
+      if (error) throw error
+
+      const keys = new Set<string>()
+
+      for (const row of (data ?? []) as Array<{ exercises?: unknown }>) {
+        if (!Array.isArray(row.exercises)) continue
+
+        for (const rawExercise of row.exercises as WorkoutSessionExerciseLite[]) {
+          const byId = normalizeProgressKey(rawExercise?.exerciseId)
+          const byName = normalizeProgressKey(rawExercise?.exerciseName)
+
+          if (byId) keys.add(byId)
+          if (byName) keys.add(byName)
+        }
+      }
+
+      setCompletedTodayKeys(Array.from(keys))
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao carregar progresso do treino de hoje.')
+    }
+  }, [targetUserId])
+
+    const loadInjuryAlerts = useCallback(async () => {
+    if (!targetUserId) {
+      setInjuryAlerts([])
+      return
+    }
+
+    try {
+      setInjuryLoading(true)
+
+      const { data, error } = await supabase
+        .from('injuries')
+        .select('id,user_id,body_part,description,severity,status')
+        .eq('user_id', targetUserId)
+        .in('status', ['active', 'chronic'])
+        .order('severity', { ascending: false })
+
+      if (error) throw error
+
+      const mapped: InjuryAlert[] = ((data ?? []) as Array<Pick<DbInjuryRow, 'id' | 'body_part' | 'description' | 'severity' | 'status'>>).map((row) => ({
+        id: row.id,
+        bodyPart: row.body_part,
+        description: row.description,
+        severity: row.severity,
+        status: row.status as 'active' | 'chronic',
+      }))
+
+      setInjuryAlerts(mapped)
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao carregar alertas de lesão.')
+      setInjuryAlerts([])
+    } finally {
+      setInjuryLoading(false)
+    }
+  }, [targetUserId])
 
   const loadExercises = useCallback(async () => {
     if (!canManagePrograms || !user) return
@@ -611,7 +810,12 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       setActiveProgramDays([])
       setActiveProgramItems({})
     }
-  }, [user, targetUserId, canManagePrograms, role, loadActiveProgramContent])
+
+        await Promise.all([
+      loadCompletedTodayProgress(),
+      loadInjuryAlerts(),
+    ])
+  }, [user, targetUserId, canManagePrograms, role, loadActiveProgramContent, loadCompletedTodayProgress, loadInjuryAlerts])
 
   useEffect(() => {
     if (!user || !targetUserId) return
@@ -710,6 +914,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       setActiveProgramId(program.id)
       setActiveProgram(program)
       await loadActiveProgramContent(program.id)
+      await loadCompletedTodayProgress()
       toast.success(`Programa "${program.name}" iniciado!`)
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao iniciar programa.')
@@ -737,6 +942,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       setActiveProgram(null)
       setActiveProgramDays([])
       setActiveProgramItems({})
+      setCompletedTodayKeys([])
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao desativar programa.')
     } finally {
@@ -923,6 +1129,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       }
       if (activeProgramId === editingProgramId) {
         await loadActiveProgramContent(editingProgramId)
+        await loadCompletedTodayProgress()
       }
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao atualizar programa.')
@@ -986,6 +1193,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       await loadProgramContentForEditor(editingContentProgram.id)
       if (activeProgramId === editingContentProgram.id) {
         await loadActiveProgramContent(editingContentProgram.id)
+        await loadCompletedTodayProgress()
       }
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao adicionar item.')
@@ -1004,6 +1212,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       await loadProgramContentForEditor(editingContentProgram.id)
       if (activeProgramId === editingContentProgram.id) {
         await loadActiveProgramContent(editingContentProgram.id)
+        await loadCompletedTodayProgress()
       }
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao remover item.')
@@ -1196,15 +1405,32 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         {day.items.length === 0 ? (
                           <div className="text-sm text-muted-foreground">Sem exercícios (descanso).</div>
                         ) : (
-                          day.items.map((it, idx) => {
+                                                    day.items.map((it, idx) => {
                             const name = it.exercise_name || it.custom_exercise_name || 'Exercício'
                             const isCardio = it.block === 'cardio'
+                            const conflicts = itemConflictsWithInjuries(it, injuryAlerts)
+
                             return (
-                              <div key={it.id ?? idx} className="flex items-center justify-between text-sm">
-                                <span className="text-muted-foreground">{name}</span>
-                                <span className="text-white">
-                                  {isCardio ? `${it.duration_min ?? 0}min ${it.notes ? `(${it.notes})` : ''}` : `${it.sets ?? 0}x${it.reps ?? '-'} ${it.notes ? `(${it.notes})` : ''}`}
-                                </span>
+                              <div key={it.id ?? idx} className="flex items-center justify-between gap-3 text-sm">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-muted-foreground">{name}</span>
+
+                                    {conflicts.length > 0 && (
+                                      <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
+                                        Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className="text-white whitespace-nowrap">
+                                    {isCardio ? `${it.duration_min ?? 0}min ${it.notes ? `(${it.notes})` : ''}` : `${it.sets ?? 0}x${it.reps ?? '-'} ${it.notes ? `(${it.notes})` : ''}`}
+                                  </span>
+
+                                  <ExerciseHelpMenu exerciseName={name} />
+                                </div>
                               </div>
                             )
                           })
@@ -1266,6 +1492,34 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
         </Card>
       )}
 
+              {!injuryLoading && injuryAlerts.length > 0 && (
+        <Card className="border-red-500/30 bg-red-500/10">
+          <CardContent className="pt-6">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="bg-red-500/20 text-red-300">
+                  Atenção para lesões
+                </Badge>
+
+                {injuryAlerts.map((injury) => (
+                  <Badge
+                    key={injury.id}
+                    variant="outline"
+                    className={injury.status === 'active' ? 'border-red-500/30 text-red-300' : 'border-orange-500/30 text-orange-300'}
+                  >
+                    {injury.bodyPart} • {injury.status === 'active' ? 'Ativa' : 'Crônica'}
+                  </Badge>
+                ))}
+              </div>
+
+              <p className="text-sm text-red-100">
+                Revise os exercícios do programa antes de prescrever ou executar. Detectamos áreas com atenção especial no perfil atual.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {activeProgram && (
         <Card className="border-primary/30 bg-gradient-to-r from-primary/20 to-purple-600/20">
           <CardContent className="space-y-4 py-6">
@@ -1279,13 +1533,22 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                     {activeProgram.source === 'assigned' && (
                       <Badge className="border border-blue-500/30 bg-blue-500/20 text-blue-300">Indicado pelo professor</Badge>
                     )}
+                    {progress.isComplete && (
+                      <Badge className="border border-green-500/30 bg-green-500/20 text-green-300">Treino concluído</Badge>
+                    )}
                   </div>
-                  <p className="text-sm text-muted-foreground">Semana {progress?.week || 1} • {activeProgram.duration}</p>
+                  <p className="text-sm text-muted-foreground">Semana 1 • {activeProgram.duration}</p>
                 </div>
               </div>
 
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setExpandedProgram(activeProgram.id)}>Continuar</Button>
+                <Button
+  variant="outline"
+  size="sm"
+  onClick={() => openWorkoutPageFromProgram(activeProgram.id)}
+>
+  Continuar
+</Button>
                 <Button
                   variant="destructive"
                   size="sm"
@@ -1298,13 +1561,32 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
               </div>
             </div>
 
-            {progress && (
-              <div>
-                <div className="mb-1 flex justify-between text-sm">
-                  <span className="text-muted-foreground">Progresso</span>
-                  <span className="text-white">{progress.completed.filter(Boolean).length} / {progress.completed.length} treinos</span>
+            <div>
+              <div className="mb-1 flex justify-between text-sm">
+                <span className="text-muted-foreground">Progresso</span>
+                <span className="text-white">{progress.completed} / {progress.total} exercícios</span>
+              </div>
+              <Progress value={progress.percent} className="h-2" />
+            </div>
+
+                                  {injuryAlerts.length > 0 && (
+              <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="bg-red-500/20 text-red-300">Lesões relevantes detectadas</Badge>
+                  {injuryAlerts.map((injury) => (
+                    <Badge
+                      key={injury.id}
+                      variant="outline"
+                      className={injury.status === 'active' ? 'border-red-500/30 text-red-300' : 'border-orange-500/30 text-orange-300'}
+                    >
+                      {injury.bodyPart}
+                    </Badge>
+                  ))}
                 </div>
-                <Progress value={(progress.completed.filter(Boolean).length / progress.completed.length) * 100} className="h-2" />
+
+                <p className="mt-2 text-sm text-red-100">
+                  Antes de seguir o programa, confirme se os exercícios do dia não agravam essas regiões.
+                </p>
               </div>
             )}
 
@@ -1317,22 +1599,64 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                   </div>
                 </div>
 
-                {todayProgramExercises.length > 0 ? (
-                  <div className="space-y-2">
-                    {todayProgramExercises.map((item) => {
-                      const exerciseName = item.exercise_name || item.custom_exercise_name || 'Exercício'
-                      const meta = item.block === 'cardio'
-                        ? [`${item.duration_min ?? 0} min`, item.zone_min_bpm || item.zone_max_bpm ? `${item.zone_min_bpm ?? '-'}-${item.zone_max_bpm ?? '-'} bpm` : null].filter(Boolean).join(' • ')
-                        : [`${item.sets ?? 0} séries`, item.reps ? `${item.reps} reps` : null].filter(Boolean).join(' • ')
+                                {todayProgramExercises.length > 0 ? (
+                  <>
+                    {hasTodayInjuryConflicts && (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                        Existem exercícios hoje que podem exigir atenção por causa das lesões registradas.
+                      </div>
+                    )}
 
-                      return (
-                        <div key={item.id} className="rounded-lg border border-border/60 bg-background/40 px-3 py-2">
-                          <div className="text-sm font-medium text-white">{exerciseName}</div>
-                          <div className="text-xs text-muted-foreground">{meta || 'Sem configuração definida'}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
+                    <div className="space-y-2">
+                      {todayProgramExercises.map((item) => {
+                        const exerciseName = item.exercise_name || item.custom_exercise_name || 'Exercício'
+                        const meta = item.block === 'cardio'
+                          ? [`${item.duration_min ?? 0} min`, item.zone_min_bpm || item.zone_max_bpm ? `${item.zone_min_bpm ?? '-'}-${item.zone_max_bpm ?? '-'} bpm` : null].filter(Boolean).join(' • ')
+                          : [`${item.sets ?? 0} séries`, item.reps ? `${item.reps} reps` : null].filter(Boolean).join(' • ')
+
+                        const exerciseKeys = [
+                          normalizeProgressKey(item.exercise_id),
+                          normalizeProgressKey(exerciseName),
+                        ].filter(Boolean)
+                        const isCompleted = exerciseKeys.some((key) => completedTodayKeys.includes(key))
+                        const conflicts = itemConflictsWithInjuries(item, injuryAlerts)
+
+                        return (
+                          <div key={item.id} className="rounded-lg border border-border/60 bg-background/40 px-3 py-2">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-sm font-medium text-white">{exerciseName}</div>
+
+                                  {isCompleted && (
+                                    <Badge className="border border-green-500/30 bg-green-500/20 text-green-300 text-[10px]">
+                                      Concluído
+                                    </Badge>
+                                  )}
+
+                                  {conflicts.length > 0 && (
+                                    <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
+                                      Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
+                                    </Badge>
+                                  )}
+                                </div>
+
+                                <div className="text-xs text-muted-foreground">{meta || 'Sem configuração definida'}</div>
+
+                                {conflicts.length > 0 && (
+                                  <div className="mt-1 text-xs text-amber-200">
+                                    Revise esse exercício por causa da região afetada.
+                                  </div>
+                                )}
+                              </div>
+
+                              <ExerciseHelpMenu exerciseName={exerciseName} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
                 ) : (
                   <div className="text-sm text-muted-foreground">
                     Nenhum exercício configurado para hoje.
@@ -1634,6 +1958,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                     ) : (
                                       <Badge variant="outline" className="text-xs">Customizado</Badge>
                                     )}
+                                    <ExerciseHelpMenu exerciseName={name} />
                                   </div>
 
                                   <div className="mt-2 text-sm text-muted-foreground">

@@ -99,23 +99,48 @@ function StudentModeBadge({ student, onExit }: StudentModeBadgeProps) {
   );
 }
 
+const pageTitles: Record<Page, string> = {
+  dashboard: 'Dashboard',
+  workout: 'Treino',
+  cardio: 'Cardio',
+  loads: 'Cargas',
+  physio: 'Fisiológico',
+  history: 'Histórico',
+  analysis: 'Análise Muscular',
+  split: 'Split',
+  onerm: '1RM',
+  injuries: 'Lesões',
+  share: 'Compartilhar',
+  programs: 'Programas',
+  settings: 'Configurações',
+  admin_exercises: 'Exercícios',
+  admin_users: 'Usuários',
+  coach_students: 'Meus Alunos',
+}
+
 function MainApp() {
   const { user, profile } = useAuth();
   const role = profile?.role ?? 'user';
   const userKey = user?.id ?? '';
 
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
-  const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [selectedStudentName, setSelectedStudentName] = useState('');
-  const [linkedCoachName, setLinkedCoachName] = useState<string | null>(null);
+ const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+const [selectedStudentId, setSelectedStudentId] = useState('');
+const [selectedStudentName, setSelectedStudentName] = useState('');
+const [linkedCoachName, setLinkedCoachName] = useState<string | null>(null);
 
-  useEffect(() => {
+useEffect(() => {
+  const currentTitle = pageTitles[currentPage] ?? 'AcademyK';
+  document.title = `AcademyK - ${currentTitle}`;
+}, [currentPage]);
+
+useEffect(() => {
   const loadLinkedCoachName = async () => {
     if (!user?.id) {
       console.log('[linkedCoach] sem user.id');
       setLinkedCoachName(null);
       return;
     }
+
 
     try {
       console.log('[linkedCoach] user.id:', user.id);
@@ -172,6 +197,23 @@ function MainApp() {
   void loadLinkedCoachName();
 }, [user?.id]);
 
+useEffect(() => {
+  const handleOpenWorkoutFromProgram = () => {
+    setCurrentPage('workout');
+  };
+
+  window.addEventListener(
+    'academy:open-workout-from-program',
+    handleOpenWorkoutFromProgram as EventListener
+  );
+
+  return () => {
+    window.removeEventListener(
+      'academy:open-workout-from-program',
+      handleOpenWorkoutFromProgram as EventListener
+    );
+  };
+}, []);
 
   const {
     workoutSessions,

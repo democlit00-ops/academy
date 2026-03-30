@@ -1,3 +1,4 @@
+//academy\app\src\components\exercises\ExercisePicker.tsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, X, Check, Dumbbell, Filter } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -95,35 +96,37 @@ export function ExercisePicker({
     [options, value]
   )
 
+  const typeFilteredOptions = useMemo(() => {
+    if (quickType === 'all') return options
+    return options.filter((option) => resolveQuickType(option) === quickType)
+  }, [options, quickType])
+
   const equipmentOptions = useMemo(() => {
     const all = Array.from(
       new Set(
-        options
+        typeFilteredOptions
           .map((option) => option.equipment?.trim())
           .filter((equipment): equipment is string => Boolean(equipment))
       )
     ).sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
     return ['all', ...all]
-  }, [options])
+  }, [typeFilteredOptions])
 
   const filteredOptions = useMemo(() => {
     const normalizedQuery = normalizeText(query)
 
-    return options.filter((option) => {
+    return typeFilteredOptions.filter((option) => {
       const matchesText =
         !normalizedQuery || buildSearchBlob(option).includes(normalizedQuery)
-
-      const matchesType =
-        quickType === 'all' || resolveQuickType(option) === quickType
 
       const matchesEquipment =
         equipmentFilter === 'all' ||
         normalizeText(option.equipment) === normalizeText(equipmentFilter)
 
-      return matchesText && matchesType && matchesEquipment
+      return matchesText && matchesEquipment
     })
-  }, [options, query, quickType, equipmentFilter])
+  }, [typeFilteredOptions, query, equipmentFilter])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -136,6 +139,18 @@ export function ExercisePicker({
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  useEffect(() => {
+    if (equipmentFilter === 'all') return
+
+    const equipmentStillAvailable = equipmentOptions.some(
+      (equipment) => normalizeText(equipment) === normalizeText(equipmentFilter)
+    )
+
+    if (!equipmentStillAvailable) {
+      setEquipmentFilter('all')
+    }
+  }, [equipmentFilter, equipmentOptions])
 
   const handleSelect = (exerciseId: string) => {
     onValueChange(exerciseId)

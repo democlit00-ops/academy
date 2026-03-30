@@ -1,5 +1,6 @@
+//academy\app\src\pages\CardioForm.tsx
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Heart, Save, Flame, History, User } from 'lucide-react'
+import { Heart, Save, Flame, History, User, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -86,6 +87,9 @@ export function CardioForm({
 
   const [historyLoading, setHistoryLoading] = useState(true)
   const [history, setHistory] = useState<CardioSession[]>([])
+
+  const [expandedIds, setExpandedIds] = useState<string[]>([])
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const estimatedMaxHeartRate = useMemo(() => {
     const age = typeof profile?.age === 'number' ? profile.age : undefined
@@ -177,6 +181,39 @@ export function CardioForm({
     setSteps('')
     setNotes('')
   }
+
+const toggleExpanded = (id: string) => {
+  setExpandedIds((prev) =>
+    prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+  )
+}
+
+const handleDeleteCardio = async (cardioId: string) => {
+  if (!effectiveUserId) return
+
+  const confirmed = window.confirm('Tem certeza que deseja excluir este cardio do histórico?')
+  if (!confirmed) return
+
+  try {
+    setDeletingId(cardioId)
+
+    const { error } = await supabase
+      .from('cardio_sessions')
+      .delete()
+      .eq('id', cardioId)
+      .eq('user_id', effectiveUserId)
+
+    if (error) throw error
+
+    setHistory((prev) => prev.filter((item) => item.id !== cardioId))
+    setExpandedIds((prev) => prev.filter((id) => id !== cardioId))
+    toast.success('Cardio excluído com sucesso ✅')
+  } catch (e: any) {
+    toast.error(e?.message ?? 'Erro ao excluir cardio.')
+  } finally {
+    setDeletingId(null)
+  }
+}
 
   const handleSubmit = () => {
     if (isStudentMode) {
@@ -452,62 +489,177 @@ export function CardioForm({
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">Data</TableHead>
-                  <TableHead className="text-muted-foreground">Tipo</TableHead>
-                  <TableHead className="text-muted-foreground">Duração</TableHead>
-                  <TableHead className="text-muted-foreground">Distância</TableHead>
-                  <TableHead className="text-muted-foreground">FC</TableHead>
-                  <TableHead className="text-muted-foreground">Zona</TableHead>
-                </TableRow>
-              </TableHeader>
+  <TableHeader>
+    <TableRow className="border-border hover:bg-transparent">
+      <TableHead className="text-muted-foreground">Abrir</TableHead>
+      <TableHead className="text-muted-foreground">Data</TableHead>
+      <TableHead className="text-muted-foreground">Tipo</TableHead>
+      <TableHead className="text-muted-foreground">Duração</TableHead>
+      <TableHead className="text-muted-foreground">Distância</TableHead>
+      <TableHead className="text-muted-foreground">FC</TableHead>
+      <TableHead className="text-muted-foreground">Zona</TableHead>
+      <TableHead className="text-right text-muted-foreground">Ações</TableHead>
+    </TableRow>
+  </TableHeader>
 
-              <TableBody>
-                {history.map((h) => (
-                  <TableRow key={h.id} className="border-border">
-                    <TableCell className="text-white">{formatDateSafe(h.date)}</TableCell>
-                    <TableCell className="text-muted-foreground">{h.type}</TableCell>
-                    <TableCell className="text-white">{h.duration} min</TableCell>
-                    <TableCell className="text-white">
-                      {h.distance !== undefined ? `${h.distance.toFixed(2)} km` : '-'}
-                    </TableCell>
-                    <TableCell className="text-white">
-                      {h.avgHeartRate || h.maxHeartRate ? (
-                        <span>
-                          {h.avgHeartRate ? `${h.avgHeartRate}` : '-'}
-                          <span className="text-muted-foreground"> / </span>
-                          {h.maxHeartRate ? `${h.maxHeartRate}` : '-'}
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="text-xs">
-                        {h.heartRateZone}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
+  <TableBody>
+    {history.map((h) => {
+      const isExpanded = expandedIds.includes(h.id)
 
-                {!historyLoading && history.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                      Nenhum cardio registrado ainda
-                    </TableCell>
-                  </TableRow>
-                )}
+      return (
+        <>
+          <TableRow
+            key={h.id}
+            className="cursor-pointer border-border transition-colors hover:bg-white/5"
+            onClick={() => toggleExpanded(h.id)}
+          >
+            <TableCell className="text-white">
+              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </TableCell>
 
-                {historyLoading && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                      Carregando histórico...
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+            <TableCell className="text-white">{formatDateSafe(h.date)}</TableCell>
+            <TableCell className="text-muted-foreground">{h.type}</TableCell>
+            <TableCell className="text-white">{h.duration} min</TableCell>
+
+            <TableCell className="text-white">
+              {h.distance !== undefined ? `${h.distance.toFixed(2)} km` : '-'}
+            </TableCell>
+
+            <TableCell className="text-white">
+              {h.avgHeartRate || h.maxHeartRate ? (
+                <span>
+                  {h.avgHeartRate ? `${h.avgHeartRate}` : '-'}
+                  <span className="text-muted-foreground"> / </span>
+                  {h.maxHeartRate ? `${h.maxHeartRate}` : '-'}
+                </span>
+              ) : (
+                '-'
+              )}
+            </TableCell>
+
+            <TableCell>
+              <Badge variant="secondary" className="text-xs">
+                {h.heartRateZone}
+              </Badge>
+            </TableCell>
+
+            <TableCell className="text-right">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                disabled={deletingId === h.id}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void handleDeleteCardio(h.id)
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TableCell>
+          </TableRow>
+
+          {isExpanded && (
+            <TableRow className="border-border bg-white/[0.03]">
+              <TableCell colSpan={8}>
+                <div className="space-y-4 py-2">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Tipo</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{h.type}</p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Duração</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{h.duration} min</p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Zona Cardíaca</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{h.heartRateZone}</p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Data</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{formatDateSafe(h.date)}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Distância</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.distance !== undefined ? `${h.distance.toFixed(2)} km` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Vel. Média</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.avgSpeed !== undefined ? `${h.avgSpeed.toFixed(1)} km/h` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">FC Média</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.avgHeartRate !== undefined ? `${h.avgHeartRate} bpm` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">FC Máxima</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.maxHeartRate !== undefined ? `${h.maxHeartRate} bpm` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Calorias</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.calories !== undefined ? `${h.calories} kcal` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Passos</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.steps !== undefined ? `${h.steps}` : '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {h.notes && (
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Observações</p>
+                      <p className="mt-1 text-sm text-white">{h.notes}</p>
+                    </div>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          )}
+        </>
+      )
+    })}
+
+    {!historyLoading && history.length === 0 && (
+      <TableRow>
+        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+          Nenhum cardio registrado ainda
+        </TableCell>
+      </TableRow>
+    )}
+
+    {historyLoading && (
+      <TableRow>
+        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+          Carregando histórico...
+        </TableCell>
+      </TableRow>
+    )}
+  </TableBody>
+</Table>
           </div>
         </CardContent>
       </Card>

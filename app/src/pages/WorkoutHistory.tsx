@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Calendar, Filter, TrendingUp } from 'lucide-react'
+import { Calendar, ChevronDown, ChevronUp, Filter, Trash2, TrendingUp } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,7 @@ import { format, startOfDay, endOfDay } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { parseLocalDate, formatLocalDate } from '@/lib/date'
+import { toast } from 'sonner'
 
 type DbWorkoutSession = {
   id: string
@@ -50,7 +51,6 @@ function coerceNumber(v: any, fallback = 0) {
   const n = typeof v === 'number' ? v : parseFloat(String(v))
   return Number.isFinite(n) ? n : fallback
 }
-
 
 function mapDbToWorkoutSession(row: DbWorkoutSession): WorkoutSession {
   const exercisesRaw = Array.isArray(row.exercises) ? row.exercises : []
@@ -95,6 +95,8 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
   const [loading, setLoading] = useState(true)
   const [workouts, setWorkouts] = useState<WorkoutSession[]>([])
   const [dbExercises, setDbExercises] = useState<DbExercise[]>([])
+  const [expandedIds, setExpandedIds] = useState<string[]>([])
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<string>('all')
   const [selectedExercise, setSelectedExercise] = useState<string>('all')
@@ -214,6 +216,37 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
     setSelectedExercise('all')
     setStartDate('')
     setEndDate('')
+  }
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+  }
+
+  const handleDeleteWorkout = async (workoutId: string) => {
+    if (!effectiveUserId) return
+
+    const confirmed = window.confirm('Tem certeza que deseja excluir este treino do histórico?')
+    if (!confirmed) return
+
+    try {
+      setDeletingId(workoutId)
+
+      const { error } = await supabase
+        .from('workout_sessions')
+        .delete()
+        .eq('id', workoutId)
+        .eq('user_id', effectiveUserId)
+
+      if (error) throw error
+
+      setWorkouts((prev) => prev.filter((workout) => workout.id !== workoutId))
+      setExpandedIds((prev) => prev.filter((id) => id !== workoutId))
+      toast.success('Treino excluído com sucesso ✅')
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao excluir treino.')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   if (user && effectiveUserId && !canViewTarget) {
@@ -371,50 +404,154 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
             <Table>
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">Abrir</TableHead>
                   <TableHead className="text-muted-foreground">Data</TableHead>
                   <TableHead className="text-muted-foreground">Dia</TableHead>
                   <TableHead className="text-muted-foreground">Exercícios</TableHead>
                   <TableHead className="text-muted-foreground">Volume</TableHead>
                   <TableHead className="text-muted-foreground">RPE Médio</TableHead>
+                  <TableHead className="text-right text-muted-foreground">Ações</TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
-                {filteredWorkouts.map((workout) => (
-                  <TableRow key={workout.id} className="border-border">
-                    <TableCell className="text-white">
-                      {formatLocalDate(workout.date, (d) => format(d, 'dd/MM/yyyy'))}
-                    </TableCell>
+                {filteredWorkouts.map((workout) => {
+                  const isExpanded = expandedIds.includes(workout.id)
+                  const avgRpe =
+                    workout.exercises.length > 0
+                      ? (
+                          workout.exercises.reduce((sum, ex) => sum + (Number.isFinite(ex.rpe) ? ex.rpe : 0), 0) /
+                          workout.exercises.length
+                        ).toFixed(1)
+                      : '-'
 
-                    <TableCell className="text-muted-foreground">{workout.weekDay}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {workout.exercises.map((ex, i) => (
-                          <Badge key={i} variant="secondary" className="text-xs">
-                            {ex.exerciseName}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-white">{formatWeight(calculateWorkoutVolume(workout))}</TableCell>
-                    <TableCell>
-                      {workout.exercises.length > 0 ? (
-                        <span className="text-white">
-                          {(
-                            workout.exercises.reduce((sum, ex) => sum + (Number.isFinite(ex.rpe) ? ex.rpe : 0), 0) /
-                            workout.exercises.length
-                          ).toFixed(1)}
-                        </span>
-                      ) : (
-                        '-'
+                  return (
+                    <>
+                      <TableRow
+                        key={workout.id}
+                        className="cursor-pointer border-border transition-colors hover:bg-white/5"
+                        onClick={() => toggleExpanded(workout.id)}
+                      >
+                        <TableCell className="text-white">
+                          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </TableCell>
+
+                        <TableCell className="text-white">
+                          {formatLocalDate(workout.date, (d) => format(d, 'dd/MM/yyyy'))}
+                        </TableCell>
+
+                        <TableCell className="text-muted-foreground">{workout.weekDay}</TableCell>
+
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {workout.exercises.slice(0, 3).map((ex, i) => (
+                              <Badge key={i} variant="secondary" className="text-xs">
+                                {ex.exerciseName}
+                              </Badge>
+                            ))}
+
+                            {workout.exercises.length > 3 && (
+                              <Badge variant="outline" className="text-xs">
+                                +{workout.exercises.length - 3}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        <TableCell className="text-white">{formatWeight(calculateWorkoutVolume(workout))}</TableCell>
+
+                        <TableCell className="text-white">{avgRpe}</TableCell>
+
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                            disabled={deletingId === workout.id}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleDeleteWorkout(workout.id)
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+
+                      {isExpanded && (
+                        <TableRow className="border-border bg-white/[0.03]">
+                          <TableCell colSpan={7}>
+                            <div className="space-y-4 py-2">
+                              {workout.exercises.map((exercise, exerciseIndex) => (
+                                <div
+                                  key={exercise.id ?? `${workout.id}-${exerciseIndex}`}
+                                  className="rounded-xl border border-border bg-background/40 p-4"
+                                >
+                                  <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                                    <div>
+                                      <h4 className="font-semibold text-white">{exercise.exerciseName}</h4>
+                                      <p className="text-sm text-muted-foreground">{exercise.muscleGroup}</p>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2">
+                                      <Badge variant="secondary">RPE: {exercise.rpe ?? '-'}</Badge>
+
+                                      {typeof exercise.avgHeartRate === 'number' && (
+                                        <Badge variant="outline">FC média: {exercise.avgHeartRate}</Badge>
+                                      )}
+
+                                      {typeof exercise.maxHeartRate === 'number' && (
+                                        <Badge variant="outline">FC máx: {exercise.maxHeartRate}</Badge>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="overflow-x-auto">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow className="border-border hover:bg-transparent">
+                                          <TableHead className="text-muted-foreground">Série</TableHead>
+                                          <TableHead className="text-muted-foreground">Reps</TableHead>
+                                          <TableHead className="text-muted-foreground">Carga</TableHead>
+                                          <TableHead className="text-muted-foreground">Volume</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {exercise.sets.map((set, setIndex) => (
+                                          <TableRow key={setIndex} className="border-border">
+                                            <TableCell className="text-white">{setIndex + 1}</TableCell>
+                                            <TableCell className="text-white">{set.reps}</TableCell>
+                                            <TableCell className="text-white">{formatWeight(set.weight)}</TableCell>
+                                            <TableCell className="text-white">
+                                              {formatWeight((set.reps || 0) * (set.weight || 0))}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+
+                                  {exercise.notes && (
+                                    <div className="mt-3 rounded-lg border border-border bg-card/60 p-3">
+                                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                                        Observações
+                                      </p>
+                                      <p className="mt-1 text-sm text-white">{exercise.notes}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </TableCell>
+                        </TableRow>
                       )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                    </>
+                  )
+                })}
 
                 {!loading && filteredWorkouts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                       Nenhum treino encontrado com os filtros selecionados
                     </TableCell>
                   </TableRow>
@@ -422,7 +559,7 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
 
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                       Carregando histórico...
                     </TableCell>
                   </TableRow>

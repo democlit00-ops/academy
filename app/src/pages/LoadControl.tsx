@@ -6,7 +6,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { LineChart, BarChart } from '@/components/charts';
 import type { WorkoutSession, LoadProgressionStatus, WeekDay } from '@/types';
-import { EXERCISE_DEFINITIONS } from '@/data/exercises';
 import {
   calculateExerciseProgress,
   determineLoadProgression,
@@ -16,7 +15,7 @@ import { format, subDays } from 'date-fns';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { parseLocalDate, formatLocalDate } from '@/lib/date'
+import { parseLocalDate, formatLocalDate } from '@/lib/date';
 
 interface LoadControlProps {
   workouts: WorkoutSession[];
@@ -63,8 +62,6 @@ function weekdayNumberToLabel(weekday?: number | null): WeekDay {
   };
   return map[weekday ?? 1] ?? 'Segunda';
 }
-
-
 
 export function LoadControl({
   workouts,
@@ -148,6 +145,7 @@ export function LoadControl({
   const loadAnalysis = useMemo((): LoadAnalysisItem[] => {
     return exerciseProgress.map((progress) => {
       const history = progress.history;
+
       if (history.length < 2) {
         return {
           exerciseId: progress.exerciseId,
@@ -155,7 +153,7 @@ export function LoadControl({
           muscleGroup: progress.muscleGroup,
           status: 'Manter carga' as LoadProgressionStatus,
           lastRPE: 7,
-          suggestion: 'Continue com a carga atual',
+          suggestion: 'Manter carga',
           lastMaxWeight: history[history.length - 1]?.maxWeight || 0,
           weightDiff: 0,
         };
@@ -170,13 +168,11 @@ export function LoadControl({
 
       let suggestion = '';
       if (status === 'Subir carga') {
-        const exercise = EXERCISE_DEFINITIONS.find((e) => e.id === progress.exerciseId);
-        const increment = exercise?.loadIncrement || 2.5;
-        suggestion = `Aumente ${increment}kg na próxima sessão`;
+        suggestion = 'Subir carga na próxima sessão';
       } else if (status === 'Manter carga') {
-        suggestion = 'Mantenha a carga atual';
+        suggestion = 'Manter carga atual';
       } else {
-        suggestion = 'Reduza a carga para garantir técnica';
+        suggestion = 'Reduzir carga na próxima sessão';
       }
 
       return {

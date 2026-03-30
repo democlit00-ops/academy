@@ -114,9 +114,9 @@ const SPLIT_TEMPLATES: Record<SplitTemplate, { name: string; description: string
     days: [
       { day: 'Segunda', muscleGroups: ['Peito', 'Tríceps'], focus: 'Peito e Tríceps', isRestDay: false },
       { day: 'Terça', muscleGroups: ['Costas', 'Bíceps'], focus: 'Costas e Bíceps', isRestDay: false },
-      { day: 'Quarta', muscleGroups: ['Quadríceps', 'Posterior', 'Panturrilha'], focus: 'Pernas', isRestDay: false },
+      { day: 'Quarta', muscleGroups: ['Pernas', 'Posterior'], focus: 'Pernas', isRestDay: false },
       { day: 'Quinta', muscleGroups: [], focus: 'Descanso', isRestDay: true },
-      { day: 'Sexta', muscleGroups: ['Ombro', 'Tríceps'], focus: 'Ombro e Tríceps', isRestDay: false },
+      { day: 'Sexta', muscleGroups: ['Ombros', 'Tríceps'], focus: 'Ombros e Tríceps', isRestDay: false },
       { day: 'Sábado', muscleGroups: ['Costas', 'Bíceps'], focus: 'Costas e Bíceps', isRestDay: false },
       { day: 'Domingo', muscleGroups: [], focus: 'Descanso', isRestDay: true },
     ],
@@ -125,11 +125,11 @@ const SPLIT_TEMPLATES: Record<SplitTemplate, { name: string; description: string
     name: 'AB - Superior / Inferior',
     description: 'Alternância entre parte superior e inferior',
     days: [
-      { day: 'Segunda', muscleGroups: ['Peito', 'Costas', 'Ombro', 'Bíceps', 'Tríceps'], focus: 'Superior', isRestDay: false },
-      { day: 'Terça', muscleGroups: ['Quadríceps', 'Posterior', 'Panturrilha', 'Core'], focus: 'Inferior', isRestDay: false },
+      { day: 'Segunda', muscleGroups: ['Peito', 'Costas', 'Ombros', 'Bíceps', 'Tríceps'], focus: 'Superior', isRestDay: false },
+      { day: 'Terça', muscleGroups: ['Pernas', 'Posterior', 'Core'], focus: 'Inferior', isRestDay: false },
       { day: 'Quarta', muscleGroups: [], focus: 'Descanso', isRestDay: true },
-      { day: 'Quinta', muscleGroups: ['Peito', 'Costas', 'Ombro', 'Bíceps', 'Tríceps'], focus: 'Superior', isRestDay: false },
-      { day: 'Sexta', muscleGroups: ['Quadríceps', 'Posterior', 'Panturrilha', 'Core'], focus: 'Inferior', isRestDay: false },
+      { day: 'Quinta', muscleGroups: ['Peito', 'Costas', 'Ombros', 'Bíceps', 'Tríceps'], focus: 'Superior', isRestDay: false },
+      { day: 'Sexta', muscleGroups: ['Pernas', 'Posterior', 'Core'], focus: 'Inferior', isRestDay: false },
       { day: 'Sábado', muscleGroups: [], focus: 'Descanso', isRestDay: true },
       { day: 'Domingo', muscleGroups: [], focus: 'Descanso', isRestDay: true },
     ],
@@ -138,24 +138,24 @@ const SPLIT_TEMPLATES: Record<SplitTemplate, { name: string; description: string
     name: 'Push / Pull / Legs',
     description: 'Empurrar, puxar e pernas',
     days: [
-      { day: 'Segunda', muscleGroups: ['Peito', 'Ombro', 'Tríceps'], focus: 'Push', isRestDay: false },
+      { day: 'Segunda', muscleGroups: ['Peito', 'Ombros', 'Tríceps'], focus: 'Push', isRestDay: false },
       { day: 'Terça', muscleGroups: ['Costas', 'Bíceps'], focus: 'Pull', isRestDay: false },
-      { day: 'Quarta', muscleGroups: ['Quadríceps', 'Posterior', 'Panturrilha'], focus: 'Legs', isRestDay: false },
+      { day: 'Quarta', muscleGroups: ['Pernas', 'Posterior'], focus: 'Legs', isRestDay: false },
       { day: 'Quinta', muscleGroups: [], focus: 'Descanso', isRestDay: true },
-      { day: 'Sexta', muscleGroups: ['Peito', 'Ombro', 'Tríceps'], focus: 'Push', isRestDay: false },
+      { day: 'Sexta', muscleGroups: ['Peito', 'Ombros', 'Tríceps'], focus: 'Push', isRestDay: false },
       { day: 'Sábado', muscleGroups: ['Costas', 'Bíceps'], focus: 'Pull', isRestDay: false },
-      { day: 'Domingo', muscleGroups: ['Quadríceps', 'Posterior', 'Panturrilha'], focus: 'Legs', isRestDay: false },
+      { day: 'Domingo', muscleGroups: ['Pernas', 'Posterior'], focus: 'Legs', isRestDay: false },
     ],
   },
   FULL_BODY: {
     name: 'Full Body 3x',
     description: 'Corpo inteiro 3 vezes na semana',
     days: [
-      { day: 'Segunda', muscleGroups: ['Peito', 'Costas', 'Quadríceps', 'Posterior', 'Ombro'], focus: 'Full Body', isRestDay: false },
+      { day: 'Segunda', muscleGroups: ['Peito', 'Costas', 'Pernas', 'Posterior', 'Ombros'], focus: 'Full Body', isRestDay: false },
       { day: 'Terça', muscleGroups: [], focus: 'Descanso', isRestDay: true },
-      { day: 'Quarta', muscleGroups: ['Peito', 'Costas', 'Quadríceps', 'Posterior', 'Ombro'], focus: 'Full Body', isRestDay: false },
+      { day: 'Quarta', muscleGroups: ['Peito', 'Costas', 'Pernas', 'Posterior', 'Ombros'], focus: 'Full Body', isRestDay: false },
       { day: 'Quinta', muscleGroups: [], focus: 'Descanso', isRestDay: true },
-      { day: 'Sexta', muscleGroups: ['Peito', 'Costas', 'Quadríceps', 'Posterior', 'Ombro'], focus: 'Full Body', isRestDay: false },
+      { day: 'Sexta', muscleGroups: ['Peito', 'Costas', 'Pernas', 'Posterior', 'Ombros'], focus: 'Full Body', isRestDay: false },
       { day: 'Sábado', muscleGroups: [], focus: 'Descanso', isRestDay: true },
       { day: 'Domingo', muscleGroups: [], focus: 'Descanso', isRestDay: true },
     ],
@@ -164,11 +164,11 @@ const SPLIT_TEMPLATES: Record<SplitTemplate, { name: string; description: string
     name: 'Upper / Lower 4x',
     description: 'Upper e lower alternado',
     days: [
-      { day: 'Segunda', muscleGroups: ['Peito', 'Costas', 'Ombro', 'Bíceps', 'Tríceps'], focus: 'Upper', isRestDay: false },
-      { day: 'Terça', muscleGroups: ['Quadríceps', 'Posterior', 'Panturrilha'], focus: 'Lower', isRestDay: false },
+      { day: 'Segunda', muscleGroups: ['Peito', 'Costas', 'Ombros', 'Bíceps', 'Tríceps'], focus: 'Upper', isRestDay: false },
+      { day: 'Terça', muscleGroups: ['Pernas', 'Posterior'], focus: 'Lower', isRestDay: false },
       { day: 'Quarta', muscleGroups: [], focus: 'Descanso', isRestDay: true },
-      { day: 'Quinta', muscleGroups: ['Peito', 'Costas', 'Ombro', 'Bíceps', 'Tríceps'], focus: 'Upper', isRestDay: false },
-      { day: 'Sexta', muscleGroups: ['Quadríceps', 'Posterior', 'Panturrilha'], focus: 'Lower', isRestDay: false },
+      { day: 'Quinta', muscleGroups: ['Peito', 'Costas', 'Ombros', 'Bíceps', 'Tríceps'], focus: 'Upper', isRestDay: false },
+      { day: 'Sexta', muscleGroups: ['Pernas', 'Posterior'], focus: 'Lower', isRestDay: false },
       { day: 'Sábado', muscleGroups: [], focus: 'Descanso', isRestDay: true },
       { day: 'Domingo', muscleGroups: [], focus: 'Descanso', isRestDay: true },
     ],
@@ -179,10 +179,10 @@ const SPLIT_TEMPLATES: Record<SplitTemplate, { name: string; description: string
     days: [
       { day: 'Segunda', muscleGroups: ['Peito'], focus: 'Peito', isRestDay: false },
       { day: 'Terça', muscleGroups: ['Costas'], focus: 'Costas', isRestDay: false },
-      { day: 'Quarta', muscleGroups: ['Ombro'], focus: 'Ombro', isRestDay: false },
+      { day: 'Quarta', muscleGroups: ['Ombros'], focus: 'Ombros', isRestDay: false },
       { day: 'Quinta', muscleGroups: ['Pernas'], focus: 'Pernas', isRestDay: false },
       { day: 'Sexta', muscleGroups: ['Bíceps', 'Tríceps'], focus: 'Braços', isRestDay: false },
-      { day: 'Sábado', muscleGroups: ['Core', 'Panturrilha'], focus: 'Core e Panturrilha', isRestDay: false },
+      { day: 'Sábado', muscleGroups: ['Core', 'Pernas'], focus: 'Core e Pernas', isRestDay: false },
       { day: 'Domingo', muscleGroups: [], focus: 'Descanso', isRestDay: true },
     ],
   },
@@ -193,9 +193,43 @@ const SPLIT_TEMPLATES: Record<SplitTemplate, { name: string; description: string
   },
 }
 
+const normalizeMuscleGroupAlias = (group: string): MuscleGroup | null => {
+  const raw = String(group ?? '').trim().toLowerCase()
+
+  const aliasMap: Record<string, MuscleGroup> = {
+    peito: 'Peito',
+    costas: 'Costas',
+    ombro: 'Ombros',
+    ombros: 'Ombros',
+    bíceps: 'Bíceps',
+    biceps: 'Bíceps',
+    tríceps: 'Tríceps',
+    triceps: 'Tríceps',
+    pernas: 'Pernas',
+    quadriceps: 'Pernas',
+    quadríceps: 'Pernas',
+    panturrilha: 'Pernas',
+    panturrilhas: 'Pernas',
+    glúteos: 'Glúteos',
+    gluteos: 'Glúteos',
+    posterior: 'Posterior',
+    posteriores: 'Posterior',
+    core: 'Core',
+    cardio: 'Cardio',
+    mobilidade: 'Mobilidade',
+    cervical: 'Mobilidade',
+    adutores: 'Pernas',
+  }
+
+  return aliasMap[raw] ?? null
+}
+
 const normalizeMuscleGroups = (groups: string[] | null | undefined): MuscleGroup[] => {
-  const allowed = new Set(MUSCLE_GROUPS)
-  return (groups ?? []).filter((group): group is MuscleGroup => allowed.has(group as MuscleGroup))
+  const normalized = (groups ?? [])
+    .map((group) => normalizeMuscleGroupAlias(group))
+    .filter((group): group is MuscleGroup => !!group)
+
+  return Array.from(new Set(normalized))
 }
 
 const buildDaysFromTemplate = (template: SplitTemplate): SplitDay[] => {
@@ -408,7 +442,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
     const map: Record<string, number> = {}
 
     for (const row of (data ?? []) as Array<{ plan_id: string; day_title: string | null; muscle_groups: string[] | null }>) {
-      const groups = row.muscle_groups ?? []
+      const groups = normalizeMuscleGroups(row.muscle_groups)
       const isRestDay = groups.length === 0 && (row.day_title ?? '').toLowerCase().includes('descanso')
 
       if (!isRestDay) {

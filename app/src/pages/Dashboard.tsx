@@ -7,10 +7,16 @@ import {
   Moon,
   Zap,
   User,
+  AlertTriangle,
+  ShieldCheck,
+  Target,
+  Gauge,
 } from 'lucide-react';
 import { StatCard } from '@/components/StatCard';
 import { RecoveryScoreRing } from '@/components/RecoveryScoreRing';
 import { LineChart, BarChart, RadarChart } from '@/components/charts';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import type {
   WorkoutSession,
   CardioSession,
@@ -33,7 +39,7 @@ import { ptBR } from 'date-fns/locale';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-import { parseLocalDate, formatLocalDate } from '@/lib/date'
+import { parseLocalDate, formatLocalDate } from '@/lib/date';
 
 interface DashboardProps {
   workouts: WorkoutSession[];
@@ -71,6 +77,14 @@ type DbPhysioRow = {
   created_at: string | null;
 };
 
+type ExecutiveSummary = {
+  overallStatus: 'Bom' | 'Atenção' | 'Recuperação baixa';
+  overallToneClass: string;
+  focusToday: string;
+  positiveHighlight: string;
+  mainAttention: string;
+};
+
 function safeNumber(v: any): number | undefined {
   if (v === null || v === undefined || v === '') return undefined;
   const n = typeof v === 'number' ? v : parseFloat(String(v));
@@ -90,6 +104,19 @@ function weekdayNumberToLabel(weekday?: number | null): WeekDay {
   return map[weekday ?? 1] ?? 'Segunda';
 }
 
+function average(values: Array<number | undefined>) {
+  const valid = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  if (valid.length === 0) return undefined;
+  return valid.reduce((sum, v) => sum + v, 0) / valid.length;
+}
+
+function getDeltaLabel(current?: number, baseline?: number, suffix = '') {
+  if (current === undefined || baseline === undefined) return 'Sem base suficiente';
+  const delta = current - baseline;
+  if (Math.abs(delta) < 0.05) return `Estável${suffix}`;
+  const signal = delta > 0 ? '+' : '';
+  return `${signal}${delta.toFixed(1)}${suffix}`;
+}
 
 export function Dashboard({
   workouts,
@@ -232,6 +259,22 @@ export function Dashboard({
     return effectiveRecoveryScores[effectiveRecoveryScores.length - 1];
   }, [effectiveRecoveryScores]);
 
+  const recentPhysioWindow = useMemo(() => {
+    return effectivePhysio.slice(-8, -1);
+  }, [effectivePhysio]);
+
+  const avgRecentSleep = useMemo(() => {
+    return average(recentPhysioWindow.map((p) => p.sleepTotalHours));
+  }, [recentPhysioWindow]);
+
+  const avgRecentFatigue = useMemo(() => {
+    return average(recentPhysioWindow.map((p) => p.fatigue));
+  }, [recentPhysioWindow]);
+
+  const avgRecentRestingHr = useMemo(() => {
+    return average(recentPhysioWindow.map((p) => p.restingHeartRate));
+  }, [recentPhysioWindow]);
+
   const strengthProgressData = useMemo(() => {
     const progress = calculateExerciseProgress(effectiveWorkouts);
     const topExercises = progress.slice(0, 3);
@@ -258,6 +301,34 @@ export function Dashboard({
       name: ex.exerciseName,
       color: ['#3b82f6', '#22c55e', '#f59e0b'][i],
     }));
+  }, [effectiveWorkouts]);
+
+  const topStrengthProgress = useMemo(() => {
+    const progress = calculateExerciseProgress(effectiveWorkouts);
+
+    return progress
+      .map((ex) => {
+        const history = ex.history;
+        if (history.length < 2) {
+          return {
+            exerciseName: ex.exerciseName,
+            delta: 0,
+            trend: 'estável' as const,
+          };
+        }
+
+        const last = history[history.length - 1];
+        const prev = history[history.length - 2];
+        const delta = last.maxWeight - prev.maxWeight;
+
+        return {
+          exerciseName: ex.exerciseName,
+          delta,
+          trend: delta > 0 ? 'subindo' as const : delta < 0 ? 'caindo' as const : 'estável' as const,
+        };
+      })
+      .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+      .slice(0, 3);
   }, [effectiveWorkouts]);
 
   const cardioData = useMemo(() => {
@@ -301,7 +372,7 @@ export function Dashboard({
     }));
   }, [effectiveRecoveryScores]);
 
-  const muscleRadarData = useMemo(() => {
+  const muscleVolumeSummary = useMemo(() => {
     const now = new Date();
     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
@@ -322,14 +393,30 @@ export function Dashboard({
       }
     });
 
-    const maxVolume = Math.max(...Object.values(muscleVolumes), 1);
+    return muscleVolumes;
+  }, [effectiveWorkouts]);
+
+  const muscleRadarData = useMemo(() => {
+    const maxVolume = Math.max(...Object.values(muscleVolumeSummary), 1);
 
     return MUSCLE_GROUPS.map((mg) => ({
       subject: mg,
-      value: Math.round(((muscleVolumes[mg] || 0) / maxVolume) * 100),
+      value: Math.round(((muscleVolumeSummary[mg] || 0) / maxVolume) * 100),
       fullMark: 100,
     }));
-  }, [effectiveWorkouts]);
+  }, [muscleVolumeSummary]);
+
+  const topMuscleVolume = useMemo(() => {
+    return Object.entries(muscleVolumeSummary)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+  }, [muscleVolumeSummary]);
+
+  const lowMuscleVolume = useMemo(() => {
+    return Object.entries(muscleVolumeSummary)
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 3);
+  }, [muscleVolumeSummary]);
 
   const weeklyWorkouts = useMemo(() => {
     const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
@@ -359,6 +446,104 @@ export function Dashboard({
       .reduce((total, c) => total + c.duration, 0);
   }, [effectiveCardio]);
 
+  const weeklyCardioDistance = useMemo(() => {
+    const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+    return effectiveCardio
+      .filter((c) => {
+        const cardioDate = parseLocalDate(c.date);
+        return cardioDate ? cardioDate >= weekStart : false;
+      })
+      .reduce((total, c) => total + (c.distance || 0), 0);
+  }, [effectiveCardio]);
+
+  const priorityAlerts = useMemo(() => {
+    const alerts: string[] = [];
+
+    if (latestRecovery && latestRecovery.score < 60) {
+      alerts.push('Recovery Score baixo para o momento atual.');
+    }
+
+    if (latestPhysio?.sleepTotalHours !== undefined && latestPhysio.sleepTotalHours < 6) {
+      alerts.push('Sono abaixo de 6 horas no registro mais recente.');
+    }
+
+    if (latestPhysio?.fatigue !== undefined && latestPhysio.fatigue >= 8) {
+      alerts.push('Cansaço alto no registro mais recente.');
+    }
+
+    if (
+      latestPhysio?.restingHeartRate !== undefined &&
+      avgRecentRestingHr !== undefined &&
+      latestPhysio.restingHeartRate >= avgRecentRestingHr + 5
+    ) {
+      alerts.push('FC de repouso acima da média recente.');
+    }
+
+    if (weeklyWorkouts === 0) {
+      alerts.push('Nenhum treino registrado nesta semana.');
+    }
+
+    if (weeklyCardioMinutes < 60) {
+      alerts.push('Cardio semanal ainda baixo.');
+    }
+
+    return alerts;
+  }, [latestRecovery, latestPhysio, avgRecentRestingHr, weeklyWorkouts, weeklyCardioMinutes]);
+
+  const positiveHighlights = useMemo(() => {
+    const positives: string[] = [];
+
+    if (latestRecovery && latestRecovery.score >= 80) {
+      positives.push('Recuperação atual está boa.');
+    }
+
+    if (weeklyWorkouts >= 3) {
+      positives.push('Boa consistência de treinos na semana.');
+    }
+
+    if (weeklyCardioMinutes >= 90) {
+      positives.push('Cardio semanal consistente.');
+    }
+
+    if (topStrengthProgress.some((item) => item.delta > 0)) {
+      positives.push('Há exercícios com força em evolução recente.');
+    }
+
+    return positives;
+  }, [latestRecovery, weeklyWorkouts, weeklyCardioMinutes, topStrengthProgress]);
+
+  const executiveSummary = useMemo<ExecutiveSummary>(() => {
+    let overallStatus: ExecutiveSummary['overallStatus'] = 'Bom';
+    let overallToneClass = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300';
+    let focusToday = 'Treino normal, mantendo boa técnica e consistência.';
+    let positiveHighlight = positiveHighlights[0] || 'Base de acompanhamento montada.';
+    let mainAttention = priorityAlerts[0] || 'Sem alertas prioritários no momento.';
+
+    if (
+      (latestRecovery && latestRecovery.score < 60) ||
+      (latestPhysio?.fatigue !== undefined && latestPhysio.fatigue >= 8)
+    ) {
+      overallStatus = 'Recuperação baixa';
+      overallToneClass = 'bg-red-500/10 border-red-500/30 text-red-300';
+      focusToday = 'Priorizar recuperação, técnica e controle de carga.';
+    } else if (
+      priorityAlerts.length > 0 ||
+      (latestPhysio?.sleepTotalHours !== undefined && latestPhysio.sleepTotalHours < 7)
+    ) {
+      overallStatus = 'Atenção';
+      overallToneClass = 'bg-amber-500/10 border-amber-500/30 text-amber-300';
+      focusToday = 'Treinar com atenção e ajustar carga conforme resposta do corpo.';
+    }
+
+    return {
+      overallStatus,
+      overallToneClass,
+      focusToday,
+      positiveHighlight,
+      mainAttention,
+    };
+  }, [latestRecovery, latestPhysio, priorityAlerts, positiveHighlights]);
+
   return (
     <div className="space-y-6 pb-20 lg:pb-6">
       <div className="flex items-center justify-between">
@@ -383,6 +568,110 @@ export function Dashboard({
         </div>
       </div>
 
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-white">
+            <Target className="h-5 w-5 text-primary" />
+            Resumo Executivo
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className={`rounded-xl border px-4 py-3 ${executiveSummary.overallToneClass}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="border-current text-current">
+                Status geral: {executiveSummary.overallStatus}
+              </Badge>
+            </div>
+            <p className="mt-2 text-sm">{executiveSummary.focusToday}</p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="rounded-xl border border-border bg-card/60 p-4">
+              <div className="mb-2 flex items-center gap-2 text-white">
+                <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                <span className="font-medium">Ponto positivo</span>
+              </div>
+              <p className="text-sm text-muted-foreground">{executiveSummary.positiveHighlight}</p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-card/60 p-4">
+              <div className="mb-2 flex items-center gap-2 text-white">
+                <AlertTriangle className="h-4 w-4 text-amber-400" />
+                <span className="font-medium">Principal atenção</span>
+              </div>
+              <p className="text-sm text-muted-foreground">{executiveSummary.mainAttention}</p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-card/60 p-4">
+              <div className="mb-2 flex items-center gap-2 text-white">
+                <Gauge className="h-4 w-4 text-blue-400" />
+                <span className="font-medium">Foco do dia</span>
+              </div>
+              <p className="text-sm text-muted-foreground">{executiveSummary.focusToday}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <AlertTriangle className="h-5 w-5 text-amber-400" />
+              Alertas prioritários
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {priorityAlerts.length > 0 ? (
+              <div className="space-y-2">
+                {priorityAlerts.map((alert, index) => (
+                  <div key={index} className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                    {alert}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+                Sem alertas prioritários relevantes no momento.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <ShieldCheck className="h-5 w-5 text-emerald-400" />
+              Tendências úteis
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="rounded-lg bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Sono vs. média recente</p>
+                <p className="mt-1 font-medium text-white">
+                  {getDeltaLabel(latestPhysio?.sleepTotalHours, avgRecentSleep, ' h')}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">Fadiga vs. média recente</p>
+                <p className="mt-1 font-medium text-white">
+                  {getDeltaLabel(latestPhysio?.fatigue, avgRecentFatigue)}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">FC repouso vs. média recente</p>
+                <p className="mt-1 font-medium text-white">
+                  {getDeltaLabel(latestPhysio?.restingHeartRate, avgRecentRestingHr, ' bpm')}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {latestRecovery && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <div className="rounded-xl border border-border bg-card p-6 lg:col-span-1">
@@ -390,6 +679,15 @@ export function Dashboard({
             <div className="flex justify-center">
               <RecoveryScoreRing score={latestRecovery.score} size={140} />
             </div>
+
+            <div className="mt-4 rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
+              {latestRecovery.score >= 80
+                ? 'Boa recuperação para manter treino normal.'
+                : latestRecovery.score >= 60
+                  ? 'Recuperação moderada. Ajuste a carga se necessário.'
+                  : 'Recuperação baixa. Atenção à intensidade e ao descanso.'}
+            </div>
+
             <div className="mt-4 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Sono</span>
@@ -446,6 +744,13 @@ export function Dashboard({
               variant="orange"
             />
             <StatCard
+              title="Distância cardio"
+              value={weeklyCardioDistance.toFixed(1)}
+              unit="km"
+              icon={<TrendingUp className="h-5 w-5" />}
+              variant="blue"
+            />
+            <StatCard
               title="FC Repouso"
               value={latestPhysio?.restingHeartRate || '--'}
               unit="bpm"
@@ -481,6 +786,27 @@ export function Dashboard({
             tooltipFormatter={(v: number, name: string) => [`${v} kg`, name]}
             height={250}
           />
+
+          <div className="mt-4 grid grid-cols-1 gap-2">
+            {topStrengthProgress.length > 0 ? (
+              topStrengthProgress.map((item, index) => (
+                <div key={`${item.exerciseName}-${index}`} className="rounded-lg bg-muted/30 px-3 py-2 text-sm">
+                  <span className="text-white">{item.exerciseName}</span>
+                  <span className="ml-2 text-muted-foreground">
+                    {item.trend === 'subindo'
+                      ? `subindo (+${item.delta.toFixed(1)} kg)`
+                      : item.trend === 'caindo'
+                        ? `caindo (${item.delta.toFixed(1)} kg)`
+                        : 'estável'}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-lg bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                Sem dados suficientes para analisar tendência de força.
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4">
@@ -494,6 +820,17 @@ export function Dashboard({
             height={250}
             colors={['#f59e0b']}
           />
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-muted/30 p-3">
+              <p className="text-xs text-muted-foreground">Minutos na semana</p>
+              <p className="mt-1 font-medium text-white">{weeklyCardioMinutes} min</p>
+            </div>
+            <div className="rounded-lg bg-muted/30 p-3">
+              <p className="text-xs text-muted-foreground">Distância na semana</p>
+              <p className="mt-1 font-medium text-white">{weeklyCardioDistance.toFixed(1)} km</p>
+            </div>
+          </div>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4">
@@ -517,6 +854,30 @@ export function Dashboard({
             color="#3b82f6"
             height={250}
           />
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="rounded-lg bg-muted/30 p-3">
+              <p className="mb-2 text-xs text-muted-foreground">Maior volume recente</p>
+              <div className="space-y-1">
+                {topMuscleVolume.map(([muscle, volume]) => (
+                  <div key={muscle} className="text-sm text-white">
+                    {muscle}: <span className="text-muted-foreground">{Math.round(volume)} kg</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-muted/30 p-3">
+              <p className="mb-2 text-xs text-muted-foreground">Menor estímulo recente</p>
+              <div className="space-y-1">
+                {lowMuscleVolume.map(([muscle, volume]) => (
+                  <div key={muscle} className="text-sm text-white">
+                    {muscle}: <span className="text-muted-foreground">{Math.round(volume)} kg</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

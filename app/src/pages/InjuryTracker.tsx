@@ -1,5 +1,6 @@
+//academy\app\src\pages\InjuryTracker.tsx
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Plus, Calendar, Activity, CheckCircle2, Trash2, Bandage, User } from 'lucide-react';
+import { AlertTriangle, Plus, Calendar, Activity, CheckCircle2, Trash2, Bandage, User, ChevronDown, ChevronUp, Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -101,6 +102,10 @@ export function InjuryTracker({
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [expandedIds, setExpandedIds] = useState<string[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const [isAdding, setIsAdding] = useState(false);
   const [bodyPart, setBodyPart] = useState('');
   const [description, setDescription] = useState('');
@@ -112,37 +117,78 @@ export function InjuryTracker({
   const recoveredInjuries = useMemo(() => injuries.filter((i) => i.status === 'recovered'), [injuries]);
   const chronicInjuries = useMemo(() => injuries.filter((i) => i.status === 'chronic'), [injuries]);
 
-  const loadInjuries = useCallback(async () => {
-  if (!effectiveUserId) return;
+    const loadInjuries = useCallback(async () => {
+    if (!effectiveUserId) {
+      setInjuries([]);
+      setLoading(false);
+      return;
+    }
 
-  setLoading(true);
-  try {
-    const { data, error } = await supabase
-      .from('injuries')
-      .select(
-        'id,user_id,body_part,description,severity,date_started,date_recovered,status,notes,affected_exercises,created_at,updated_at'
-      )
-      .eq('user_id', effectiveUserId)
-      .order('date_started', { ascending: false })
-      .order('created_at', { ascending: false });
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('injuries')
+        .select(
+          'id,user_id,body_part,description,severity,date_started,date_recovered,status,notes,affected_exercises,created_at,updated_at'
+        )
+        .eq('user_id', effectiveUserId)
+        .order('date_started', { ascending: false })
+        .order('created_at', { ascending: false });
 
-    if (error) throw error;
+      if (error) throw error;
 
-    setInjuries(((data ?? []) as DbInjuryRow[]).map(mapDbToInjury));
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : 'Erro ao carregar lesões.';
-    toast.error(message);
-    setInjuries([]);
-  } finally {
-    setLoading(false);
-  }
-}, [effectiveUserId]);
+      setInjuries(((data ?? []) as DbInjuryRow[]).map(mapDbToInjury));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Erro ao carregar lesões.';
+      toast.error(message);
+      setInjuries([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [effectiveUserId]);
 
   useEffect(() => {
   void loadInjuries();
 }, [loadInjuries]);
 
-  const handleSubmit = async () => {
+    const clearForm = () => {
+    setBodyPart('');
+    setDescription('');
+    setSeverity(5);
+    setDateStarted(getTodayLocalDateString());
+    setNotes('');
+  };
+
+  const openAddForm = () => {
+    clearForm();
+    setEditingId(null);
+    setIsAdding(true);
+  };
+
+  const cancelForm = () => {
+    clearForm();
+    setEditingId(null);
+    setIsAdding(false);
+  };
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const startEdit = (injury: Injury) => {
+    setBodyPart(String(injury.bodyPart ?? ''));
+    setDescription(injury.description ?? '');
+    setSeverity(injury.severity ?? 5);
+    setDateStarted(injury.dateStarted || getTodayLocalDateString());
+    setNotes(injury.notes ?? '');
+    setEditingId(injury.id);
+    setIsAdding(true);
+    setExpandedIds((prev) => (prev.includes(injury.id) ? prev : [...prev, injury.id]));
+  };
+
+    const handleSubmit = async () => {
     if (!user?.id) {
       toast.error('Usuário não autenticado');
       return;
@@ -159,6 +205,35 @@ export function InjuryTracker({
     }
 
     try {
+      if (editingId) {
+        const updates = {
+          body_part: bodyPart,
+          description,
+          severity,
+          date_started: dateStarted,
+          notes: notes || null,
+        };
+
+        const { data, error } = await supabase
+          .from('injuries')
+          .update(updates)
+          .eq('id', editingId)
+          .eq('user_id', user.id)
+          .select(
+            'id,user_id,body_part,description,severity,date_started,date_recovered,status,notes,affected_exercises,created_at,updated_at'
+          )
+          .single();
+
+        if (error) throw error;
+
+        setInjuries((prev) =>
+          prev.map((item) => (item.id === editingId ? mapDbToInjury(data as DbInjuryRow) : item))
+        );
+        toast.success('Lesão atualizada com sucesso ✅');
+        cancelForm();
+        return;
+      }
+
       const payload = {
         user_id: user.id,
         body_part: bodyPart,
@@ -182,17 +257,11 @@ export function InjuryTracker({
 
       setInjuries((prev) => [mapDbToInjury(data as DbInjuryRow), ...prev]);
       toast.success('Lesão registrada! Cuide-se! 💚');
-
-      setBodyPart('');
-      setDescription('');
-      setSeverity(5);
-      setDateStarted(getTodayLocalDateString());
-      setNotes('');
-      setIsAdding(false);
+      cancelForm();
     } catch (e: unknown) {
-  const message = e instanceof Error ? e.message : 'Erro ao registrar lesão.';
-  toast.error(message);
-}
+      const message = e instanceof Error ? e.message : editingId ? 'Erro ao atualizar lesão.' : 'Erro ao registrar lesão.';
+      toast.error(message);
+    }
   };
 
   const handleRecover = async (id: string) => {
@@ -252,28 +321,239 @@ export function InjuryTracker({
 }
   };
 
-  const handleDelete = async (id: string) => {
+    const handleDelete = async (id: string) => {
     if (isStudentMode) {
       toast.error('No Modo Aluno, as lesões ficam em visualização nesta versão.');
       return;
     }
 
+    const confirmed = window.confirm('Tem certeza que deseja excluir esta lesão?');
+    if (!confirmed) return;
+
     try {
-      const { error } = await supabase.from('injuries').delete().eq('id', id);
+      setDeletingId(id);
+
+      const { error } = await supabase
+        .from('injuries')
+        .delete()
+        .eq('id', id);
+
       if (error) throw error;
 
       setInjuries((prev) => prev.filter((item) => item.id !== id));
+      setExpandedIds((prev) => prev.filter((item) => item !== id));
+
+      if (editingId === id) {
+        cancelForm();
+      }
+
       toast.success('Lesão removida.');
     } catch (e: unknown) {
-  const message = e instanceof Error ? e.message : 'Erro ao atualizar lesão.';
-  toast.error(message);
-}
+      const message = e instanceof Error ? e.message : 'Erro ao excluir lesão.';
+      toast.error(message);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const getDaysSince = (date: string) => {
     const parsed = parseLocalDate(date);
     if (!parsed) return 0;
     return differenceInDays(new Date(), parsed);
+  };
+
+  const renderInjuryCard = (injury: Injury) => {
+    const isExpanded = expandedIds.includes(injury.id);
+
+    const statusMeta =
+      injury.status === 'active'
+        ? {
+            border: 'border-red-500/30',
+            badgeClass: severityLabels[injury.severity]?.color || 'bg-gray-500',
+            badgeText: `${injury.severity}/10`,
+          }
+        : injury.status === 'chronic'
+          ? {
+              border: 'border-orange-500/30',
+              badgeClass: 'border-orange-500/30 text-orange-400',
+              badgeText: 'Crônico',
+            }
+          : {
+              border: 'border-green-500/30',
+              badgeClass: 'bg-green-500/20 text-green-400',
+              badgeText: 'Recuperado',
+            };
+
+    return (
+      <Card key={injury.id} className={`${statusMeta.border} bg-card`}>
+        <CardContent className="p-4">
+          <div
+            className="cursor-pointer"
+            onClick={() => toggleExpanded(injury.id)}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-medium text-white">{injury.bodyPart}</h3>
+
+                  {injury.status === 'active' ? (
+                    <Badge className={statusMeta.badgeClass}>{statusMeta.badgeText}</Badge>
+                  ) : injury.status === 'chronic' ? (
+                    <Badge variant="outline" className={statusMeta.badgeClass}>
+                      {statusMeta.badgeText}
+                    </Badge>
+                  ) : (
+                    <Badge className={statusMeta.badgeClass}>
+                      <CheckCircle2 className="mr-1 h-3 w-3" />
+                      {statusMeta.badgeText}
+                    </Badge>
+                  )}
+                </div>
+
+                <p className="mt-1 text-sm text-muted-foreground">{injury.description}</p>
+
+                <p className="mt-2 text-xs text-muted-foreground">
+                  <Calendar className="mr-1 inline h-3 w-3" />
+                  Início em {formatLocalDate(injury.dateStarted, (d) => format(d, 'dd/MM/yyyy'))}
+                  {injury.status !== 'recovered' ? ` • ${getDaysSince(injury.dateStarted)} dias` : ''}
+                </p>
+              </div>
+
+              <div className="shrink-0 text-muted-foreground">
+                {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </div>
+            </div>
+          </div>
+
+          {isExpanded && (
+            <div className="mt-4 space-y-4 border-t border-border pt-4">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Local</p>
+                  <p className="mt-1 text-sm font-semibold text-white">{injury.bodyPart}</p>
+                </div>
+
+                <div className="rounded-xl border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Severidade</p>
+                  <p className="mt-1 text-sm font-semibold text-white">
+                    {injury.severity}/10 • {severityLabels[injury.severity]?.label ?? 'Sem classificação'}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Início</p>
+                  <p className="mt-1 text-sm font-semibold text-white">
+                    {formatLocalDate(injury.dateStarted, (d) => format(d, 'dd/MM/yyyy'))}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Status</p>
+                  <p className="mt-1 text-sm font-semibold text-white">
+                    {injury.status === 'active'
+                      ? 'Ativa'
+                      : injury.status === 'chronic'
+                        ? 'Crônica'
+                        : 'Recuperada'}
+                  </p>
+                </div>
+              </div>
+
+              {injury.dateRecovered && (
+                <div className="rounded-xl border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Data de recuperação</p>
+                  <p className="mt-1 text-sm text-white">
+                    {formatLocalDate(injury.dateRecovered, (d) => format(d, 'dd/MM/yyyy'))}
+                  </p>
+                </div>
+              )}
+
+              {injury.notes && (
+                <div className="rounded-xl border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Observações</p>
+                  <p className="mt-1 text-sm text-white">{injury.notes}</p>
+                </div>
+              )}
+
+              {!isStudentMode && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startEdit(injury);
+                    }}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Editar
+                  </Button>
+
+                  {injury.status === 'active' && (
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRecover(injury.id);
+                        }}
+                        className="gap-1 border-green-500/30 text-green-400"
+                      >
+                        <CheckCircle2 className="h-4 w-4" />
+                        Recuperado
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleMarkChronic(injury.id);
+                        }}
+                        className="text-muted-foreground"
+                      >
+                        Crônico
+                      </Button>
+                    </>
+                  )}
+
+                  {injury.status === 'chronic' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRecover(injury.id);
+                      }}
+                      className="gap-1 border-green-500/30 text-green-400"
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      Recuperado
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={deletingId === injury.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDelete(injury.id);
+                    }}
+                    className="gap-1 text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {deletingId === injury.id ? 'Excluindo...' : 'Excluir'}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
   };
 
   return (
@@ -295,8 +575,8 @@ export function InjuryTracker({
           )}
         </div>
 
-        {!isStudentMode && (
-          <Button onClick={() => setIsAdding(!isAdding)} className="gap-2">
+                {!isStudentMode && (
+          <Button onClick={() => (isAdding ? cancelForm() : openAddForm())} className="gap-2">
             {isAdding ? 'Cancelar' : <><Plus className="w-4 h-4" /> Registrar Lesão</>}
           </Button>
         )}
@@ -320,12 +600,12 @@ export function InjuryTracker({
         </Card>
       )}
 
-      {isAdding && !isStudentMode && (
+            {isAdding && !isStudentMode && (
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-white">
               <Bandage className="w-5 h-5 text-red-500" />
-              Nova Lesão
+              {editingId ? 'Editar Lesão' : 'Nova Lesão'}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -343,6 +623,7 @@ export function InjuryTracker({
                   </SelectContent>
                 </Select>
               </div>
+
               <div className="space-y-2">
                 <Label>Data de Início</Label>
                 <Input
@@ -395,10 +676,16 @@ export function InjuryTracker({
               />
             </div>
 
-            <Button onClick={handleSubmit} className="w-full gap-2">
-              <Plus className="w-4 h-4" />
-              Registrar Lesão
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button onClick={handleSubmit} className="flex-1 gap-2">
+                {editingId ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {editingId ? 'Salvar Alterações' : 'Registrar Lesão'}
+              </Button>
+
+              <Button variant="outline" onClick={cancelForm} className="flex-1">
+                Cancelar
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -411,131 +698,38 @@ export function InjuryTracker({
         </Card>
       )}
 
-      {!loading && activeInjuries.length > 0 && (
+            {!loading && activeInjuries.length > 0 && (
         <div className="space-y-3">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
             <Activity className="w-5 h-5 text-red-500" />
             Lesões Ativas
           </h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {activeInjuries.map((injury) => (
-              <Card key={injury.id} className="border-red-500/30 bg-card">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-medium text-white">{injury.bodyPart}</h3>
-                        <Badge className={severityLabels[injury.severity]?.color}>
-                          {injury.severity}/10
-                        </Badge>
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">{injury.description}</p>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        <Calendar className="mr-1 inline h-3 w-3" />
-                        {getDaysSince(injury.dateStarted)} dias
-                      </p>
-                    </div>
-                  </div>
-
-                  {injury.notes && (
-                    <p className="mt-3 rounded bg-muted/50 p-2 text-sm text-muted-foreground">
-                      {injury.notes}
-                    </p>
-                  )}
-
-                  {!isStudentMode && (
-                    <div className="mt-4 flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRecover(injury.id)}
-                        className="flex-1 gap-1 border-green-500/30 text-green-400"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        Recuperado
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleMarkChronic(injury.id)}
-                        className="text-muted-foreground"
-                      >
-                        Crônico
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDelete(injury.id)}
-                        className="text-destructive"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+            {activeInjuries.map((injury) => renderInjuryCard(injury))}
           </div>
         </div>
       )}
 
-      {!loading && chronicInjuries.length > 0 && (
+            {!loading && chronicInjuries.length > 0 && (
         <div className="space-y-3">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
             <Activity className="w-5 h-5 text-orange-500" />
             Condições Crônicas
           </h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {chronicInjuries.map((injury) => (
-              <Card key={injury.id} className="border-orange-500/30 bg-card">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-medium text-white">{injury.bodyPart}</h3>
-                        <Badge variant="outline" className="border-orange-500/30 text-orange-400">
-                          Crônico
-                        </Badge>
-                      </div>
-                      <p className="mt-1 text-sm text-muted-foreground">{injury.description}</p>
-                    </div>
-                  </div>
-                  {injury.notes && (
-                    <p className="mt-3 text-sm text-muted-foreground">{injury.notes}</p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+            {chronicInjuries.map((injury) => renderInjuryCard(injury))}
           </div>
         </div>
       )}
 
-      {!loading && recoveredInjuries.length > 0 && (
+            {!loading && recoveredInjuries.length > 0 && (
         <div className="space-y-3">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
             <CheckCircle2 className="w-5 h-5 text-green-500" />
             Recuperados
           </h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {recoveredInjuries.slice(0, 4).map((injury) => (
-              <Card key={injury.id} className="border-green-500/30 bg-card opacity-70">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-medium text-white">{injury.bodyPart}</h3>
-                    <Badge className="bg-green-500/20 text-green-400">
-                      <CheckCircle2 className="mr-1 h-3 w-3" />
-                      Recuperado
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{injury.description}</p>
-                  {injury.dateRecovered && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Recuperado em {formatLocalDate(injury.dateRecovered, (d) => format(d, 'dd/MM/yyyy'))}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
+            {recoveredInjuries.map((injury) => renderInjuryCard(injury))}
           </div>
         </div>
       )}

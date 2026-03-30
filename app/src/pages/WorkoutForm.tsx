@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { parseLocalDate, getTodayLocalDateString } from '@/lib/date'
 import { ExercisePicker, type ExercisePickerOption } from '@/components/exercises/ExercisePicker'
+import { ExerciseHelpMenu } from '@/components/exercises/ExerciseHelpMenu'
 
 interface WorkoutFormProps {
   onSave: (workout: WorkoutSession) => void
@@ -65,7 +66,40 @@ type DbSplitDay = {
   muscle_groups: string[] | null
 }
 
+type DbWorkoutSessionRow = {
+  session_date: string
+  exercises: unknown
+}
+
 type ExerciseSourceMode = 'bank' | 'custom'
+
+type ProgramSuggestedExercise = {
+  planItemId: string
+  sortOrder: number
+  sourceExerciseId: string
+  exerciseName: string
+  muscleGroup: MuscleGroup
+  notes?: string
+  sets: WorkoutSet[]
+  sourceMode: ExerciseSourceMode
+}
+
+type DbInjuryRow = {
+  id: string
+  user_id: string
+  body_part: string
+  description: string
+  severity: number
+  status: 'active' | 'recovered' | 'chronic'
+}
+
+type InjuryAlert = {
+  id: string
+  bodyPart: string
+  description: string
+  severity: number
+  status: 'active' | 'chronic'
+}
 
 const WEEK_DAYS: WeekDay[] = [
   'Segunda',
@@ -155,6 +189,147 @@ function inferSourceMode(exercise: WorkoutExercise) {
   return exercise.sourceMode ?? (exercise.exerciseId ? 'bank' : 'custom')
 }
 
+function normalizeExerciseLookupKey(value?: string | null) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function isWorkoutSetArray(value: unknown): value is WorkoutSet[] {
+  return Array.isArray(value)
+}
+
+function buildLastExerciseSetMap(rows: DbWorkoutSessionRow[]) {
+  const map = new Map<string, WorkoutSet[]>()
+
+  for (const row of rows) {
+    if (!Array.isArray(row.exercises)) continue
+
+    for (const rawExercise of row.exercises) {
+      const exercise = rawExercise as Partial<WorkoutExercise>
+      const sets = isWorkoutSetArray(exercise.sets) ? exercise.sets : []
+      if (sets.length === 0) continue
+
+      const exerciseIdKey = normalizeExerciseLookupKey(exercise.exerciseId)
+      const exerciseNameKey = normalizeExerciseLookupKey(exercise.exerciseName)
+
+      if (exerciseIdKey && !map.has(exerciseIdKey)) {
+        map.set(exerciseIdKey, sets)
+      }
+
+      if (exerciseNameKey && !map.has(exerciseNameKey)) {
+        map.set(exerciseNameKey, sets)
+      }
+    }
+  }
+
+  return map
+}
+
+function resolvePrefilledSets(
+  setsCount: number,
+  repsN: number,
+  fallbackWeight: number,
+  previousSets?: WorkoutSet[]
+): WorkoutSet[] {
+  const safeFallbackWeight = Number.isFinite(fallbackWeight) ? fallbackWeight : 0
+
+  if (!previousSets || previousSets.length === 0) {
+    return Array.from({ length: setsCount }).map(() => ({
+      reps: repsN,
+      weight: safeFallbackWeight,
+    }))
+  }
+
+  if (previousSets.length === setsCount) {
+    return Array.from({ length: setsCount }).map((_, index) => ({
+      reps: repsN,
+      weight: Number(previousSets[index]?.weight ?? safeFallbackWeight) || 0,
+    }))
+  }
+
+  const lastKnownWeight =
+    [...previousSets]
+      .reverse()
+      .map((set) => Number(set?.weight ?? NaN))
+      .find((weight) => Number.isFinite(weight)) ?? safeFallbackWeight
+
+  return Array.from({ length: setsCount }).map(() => ({
+    reps: repsN,
+    weight: Number(lastKnownWeight) || 0,
+  }))
+}
+
+function buildExerciseMeta(sets: WorkoutSet[]) {
+  const setsCount = sets.length
+  const repsValues = sets
+    .map((set) => Number(set.reps || 0))
+    .filter((value) => Number.isFinite(value) && value > 0)
+
+  const minReps = repsValues.length > 0 ? Math.min(...repsValues) : null
+  const maxReps = repsValues.length > 0 ? Math.max(...repsValues) : null
+
+  const repsLabel =
+    minReps && maxReps
+      ? minReps === maxReps
+        ? `${minReps} reps`
+        : `${minReps}-${maxReps} reps`
+      : 'Sem reps definidas'
+
+  return `${setsCount} ${setsCount === 1 ? 'série' : 'séries'} • ${repsLabel}`
+}
+
+function normalizeInjuryKey(value?: string | null) {
+  return normalizeExerciseLookupKey(value)
+}
+
+function getInjuryAliases(bodyPart: string) {
+  const key = normalizeInjuryKey(bodyPart)
+
+  const aliasMap: Record<string, string[]> = {
+    peito: ['peito'],
+    costas: ['costas', 'lombar'],
+    ombros: ['ombro', 'deltoide'],
+    ombro: ['ombro', 'deltoide'],
+    'ombro (articulacao)': ['ombro', 'deltoide', 'peito', 'triceps'],
+    bíceps: ['biceps'],
+    biceps: ['biceps'],
+    tríceps: ['triceps'],
+    triceps: ['triceps'],
+    pernas: ['perna', 'quadriceps', 'posterior', 'gluteos', 'panturrilhas', 'joelho'],
+    glúteos: ['gluteos', 'quadril'],
+    gluteos: ['gluteos', 'quadril'],
+    posterior: ['posterior', 'isquiotibiais', 'perna'],
+    core: ['core', 'abdomen', 'lombar'],
+    joelho: ['joelho', 'quadriceps', 'posterior', 'gluteos', 'panturrilhas', 'perna'],
+    cotovelo: ['cotovelo', 'biceps', 'triceps', 'antebraco'],
+    pulso: ['pulso', 'antebraco'],
+    quadril: ['quadril', 'gluteos', 'posterior', 'adutores'],
+    tornozelo: ['tornozelo', 'panturrilhas'],
+    lombar: ['lombar', 'costas', 'core', 'abdomen'],
+    cervical: ['cervical', 'ombro', 'costas', 'mobilidade'],
+  }
+
+  return aliasMap[key] ?? [key]
+}
+
+function getConflictingInjuries(params: {
+  muscleGroup?: string | null
+  exerciseName?: string | null
+  injuries: InjuryAlert[]
+}) {
+  const muscleGroup = normalizeInjuryKey(params.muscleGroup)
+  const exerciseName = normalizeInjuryKey(params.exerciseName)
+  const combined = `${muscleGroup} ${exerciseName}`
+
+  return params.injuries.filter((injury) => {
+    const aliases = getInjuryAliases(injury.bodyPart)
+    return aliases.some((alias) => alias && combined.includes(alias))
+  })
+}
+
 export function WorkoutForm({
   onSave,
   selectedUserId,
@@ -162,40 +337,84 @@ export function WorkoutForm({
 }: WorkoutFormProps) {
   const { user } = useAuth()
   const isStudentMode = !!selectedUserId
-  const targetUserId = user?.id || null
+  const targetUserId = selectedUserId ?? user?.id ?? null
 
   const [date, setDate] = useState(getTodayLocalDateString())
   const [weekDay, setWeekDay] = useState<WeekDay>(getWeekDayFromDateString(getTodayLocalDateString()))
 
   const [exercises, setExercises] = useState<WorkoutExercise[]>([])
+  const [programExercises, setProgramExercises] = useState<ProgramSuggestedExercise[]>([])
   const [loadingPlan, setLoadingPlan] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [dbExercises, setDbExercises] = useState<DbExercise[]>([])
   const [lastAutoLoadedKey, setLastAutoLoadedKey] = useState<string | null>(null)
   const [activeProgramId, setActiveProgramId] = useState<string | null>(null)
   const [activeSplit, setActiveSplit] = useState<DbSplitPlan | null>(null)
   const [activeSplitDay, setActiveSplitDay] = useState<DbSplitDay | null>(null)
+  const [injuryAlerts, setInjuryAlerts] = useState<InjuryAlert[]>([])
+  const [injuryLoading, setInjuryLoading] = useState(false)
 
   const exercisePickerOptions = useMemo<ExercisePickerOption[]>(
-  () =>
-    dbExercises.map((exercise) => ({
-      id: exercise.id,
-      name: exercise.name,
-      muscle_group: exercise.muscle_group,
-      category: exercise.category,
-      type: exercise.type,
-      equipment: exercise.equipment ?? null,
-      aliases: exercise.aliases ?? [],
-      notes: exercise.notes ?? null,
-      is_active: exercise.is_active,
-    })),
-  [dbExercises]
-)
+    () =>
+      dbExercises.map((exercise) => ({
+        id: exercise.id,
+        name: exercise.name,
+        muscle_group: exercise.muscle_group,
+        category: exercise.category,
+        type: exercise.type,
+        equipment: exercise.equipment ?? null,
+        aliases: exercise.aliases ?? [],
+        notes: exercise.notes ?? null,
+        is_active: exercise.is_active,
+      })),
+    [dbExercises]
+  )
 
   const dbExercisesById = useMemo(() => {
     const map = new Map<string, DbExercise>()
     dbExercises.forEach((e) => map.set(e.id, e))
     return map
   }, [dbExercises])
+
+  const programAddedKeys = useMemo(() => {
+    return new Set(
+      exercises
+        .map((exercise) => exercise.exerciseId || exercise.exerciseName || '')
+        .map((value) => normalizeExerciseLookupKey(value))
+        .filter(Boolean)
+    )
+  }, [exercises])
+
+  const hasProgramSuggestions = !!activeProgramId && programExercises.length > 0
+
+  const todaySplitGroups = (activeSplitDay?.muscle_groups ?? []).filter(Boolean)
+
+  const isSplitRestDay =
+    !!activeSplitDay &&
+    todaySplitGroups.length === 0 &&
+    (activeSplitDay.day_title ?? '').toLowerCase().includes('descanso')
+
+  const canSuggestFromSplit =
+    !activeProgramId &&
+    !!activeSplitDay &&
+    !isSplitRestDay &&
+    todaySplitGroups.length > 0 &&
+    exercises.length === 0
+
+  const splitConflictGroups = useMemo(() => {
+    return todaySplitGroups
+      .map((group) => ({
+        group,
+        conflicts: getConflictingInjuries({
+          muscleGroup: group,
+          exerciseName: group,
+          injuries: injuryAlerts,
+        }),
+      }))
+      .filter((entry) => entry.conflicts.length > 0)
+  }, [todaySplitGroups, injuryAlerts])
+
+  const hasSplitConflicts = splitConflictGroups.length > 0
 
   useEffect(() => {
     const loadExercises = async () => {
@@ -218,10 +437,48 @@ export function WorkoutForm({
 
   useEffect(() => {
     setExercises([])
+    setProgramExercises([])
     setLastAutoLoadedKey(null)
     setActiveProgramId(null)
     setActiveSplit(null)
     setActiveSplitDay(null)
+    setInjuryAlerts([])
+  }, [targetUserId])
+
+  useEffect(() => {
+    if (!targetUserId) return
+
+    const loadInjuries = async () => {
+      try {
+        setInjuryLoading(true)
+
+        const { data, error } = await supabase
+          .from('injuries')
+          .select('id,user_id,body_part,description,severity,status')
+          .eq('user_id', targetUserId)
+          .in('status', ['active', 'chronic'])
+          .order('severity', { ascending: false })
+
+        if (error) throw error
+
+        const mapped: InjuryAlert[] = ((data ?? []) as DbInjuryRow[]).map((row) => ({
+          id: row.id,
+          bodyPart: row.body_part,
+          description: row.description,
+          severity: row.severity,
+          status: row.status as 'active' | 'chronic',
+        }))
+
+        setInjuryAlerts(mapped)
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Erro ao carregar alertas de lesão.')
+        setInjuryAlerts([])
+      } finally {
+        setInjuryLoading(false)
+      }
+    }
+
+    void loadInjuries()
   }, [targetUserId])
 
   useEffect(() => {
@@ -245,19 +502,20 @@ export function WorkoutForm({
         const weekdayNum = weekDayToNumber(weekDay)
 
         if (activeSplitId) {
-          const [{ data: splitPlan, error: splitPlanErr }, { data: splitDay, error: splitDayErr }] = await Promise.all([
-            supabase
-              .from('plans')
-              .select('id,title,description,visibility')
-              .eq('id', activeSplitId)
-              .maybeSingle(),
-            supabase
-              .from('plan_days')
-              .select('id,plan_id,weekday,day_title,muscle_groups')
-              .eq('plan_id', activeSplitId)
-              .eq('weekday', weekdayNum)
-              .maybeSingle(),
-          ])
+          const [{ data: splitPlan, error: splitPlanErr }, { data: splitDay, error: splitDayErr }] =
+            await Promise.all([
+              supabase
+                .from('plans')
+                .select('id,title,description,visibility')
+                .eq('id', activeSplitId)
+                .maybeSingle(),
+              supabase
+                .from('plan_days')
+                .select('id,plan_id,weekday,day_title,muscle_groups')
+                .eq('plan_id', activeSplitId)
+                .eq('weekday', weekdayNum)
+                .maybeSingle(),
+            ])
 
           if (splitPlanErr) throw splitPlanErr
           if (splitDayErr) throw splitDayErr
@@ -270,6 +528,7 @@ export function WorkoutForm({
         }
 
         if (!nextActiveProgramId) {
+          setProgramExercises([])
           setLoadingPlan(false)
           return
         }
@@ -283,56 +542,70 @@ export function WorkoutForm({
 
         if (dayErr) throw dayErr
         if (!dayRow?.id) {
+          setProgramExercises([])
           setLoadingPlan(false)
           return
         }
 
-        const { data: items, error: itemsErr } = await supabase
-          .from('plan_items')
-          .select(`
-            id,block,sets,reps,target_weight,notes,duration_min,sort_order,custom_exercise_name,exercise_id,muscle_group,
-            exercises:exercise_id ( name )
-          `)
-          .eq('plan_day_id', dayRow.id)
-          .order('sort_order', { ascending: true })
+        const [{ data: items, error: itemsErr }, { data: recentRows, error: recentErr }] =
+          await Promise.all([
+            supabase
+              .from('plan_items')
+              .select(`
+                id,block,sets,reps,target_weight,notes,duration_min,sort_order,custom_exercise_name,exercise_id,muscle_group,
+                exercises:exercise_id ( name )
+              `)
+              .eq('plan_day_id', dayRow.id)
+              .order('sort_order', { ascending: true }),
+            supabase
+              .from('workout_sessions')
+              .select('session_date, exercises')
+              .eq('user_id', targetUserId)
+              .order('session_date', { ascending: false })
+              .limit(50),
+          ])
 
         if (itemsErr) throw itemsErr
+        if (recentErr) throw recentErr
+
+        const recentWorkoutRows = (recentRows ?? []) as DbWorkoutSessionRow[]
+        const lastExerciseSetMap = buildLastExerciseSetMap(recentWorkoutRows)
 
         const planItems = (items ?? []) as unknown as DbPlanItem[]
         const strengthItems = planItems.filter((it) => it.block === 'strength')
 
-        const mapped: WorkoutExercise[] = strengthItems.map((it) => {
+        const mapped: ProgramSuggestedExercise[] = strengthItems.map((it) => {
           const exId = it.exercise_id ?? ''
           const exName = it.exercises?.name ?? it.custom_exercise_name ?? 'Exercício'
           const mg = normalizeMuscleGroup(it.muscle_group || dbExercisesById.get(exId)?.muscle_group || 'Peito')
 
           const setsCount = Math.max(it.sets ?? 1, 1)
           const repsN = parseRepsToNumber(it.reps)
-          const weight = typeof it.target_weight === 'number' ? Number(it.target_weight) : 0
+          const fallbackWeight = typeof it.target_weight === 'number' ? Number(it.target_weight) : 0
 
-          const sets: WorkoutSet[] = Array.from({ length: setsCount }).map(() => ({
-            reps: repsN,
-            weight,
-          }))
+          const lookupById = normalizeExerciseLookupKey(exId)
+          const lookupByName = normalizeExerciseLookupKey(exName)
+
+          const previousSets =
+            (lookupById ? lastExerciseSetMap.get(lookupById) : undefined) ??
+            (lookupByName ? lastExerciseSetMap.get(lookupByName) : undefined)
+
+          const sets = resolvePrefilledSets(setsCount, repsN, fallbackWeight, previousSets)
 
           return {
-            id: crypto.randomUUID(),
-            exerciseId: exId,
+            planItemId: it.id,
+            sortOrder: it.sort_order,
+            sourceExerciseId: exId,
             exerciseName: exName,
             muscleGroup: mg,
-            sets,
-            rpe: 7,
             notes: it.notes ?? undefined,
+            sets,
+            sourceMode: exId ? 'bank' : 'custom',
           }
         })
 
         const autoLoadKey = `${targetUserId}:${nextActiveProgramId}:${weekdayNum}`
-
-        setExercises((prev) => {
-          if (prev.length > 0 && lastAutoLoadedKey !== autoLoadKey) return prev
-          return mapped
-        })
-
+        setProgramExercises(mapped)
         setLastAutoLoadedKey(autoLoadKey)
       } catch (e: any) {
         toast.error(e?.message ?? 'Erro ao carregar treino do dia do programa ativo.')
@@ -342,32 +615,32 @@ export function WorkoutForm({
     }
 
     void loadPlanForDay()
-  }, [targetUserId, weekDay, dbExercisesById, lastAutoLoadedKey])
+  }, [targetUserId, weekDay, dbExercisesById])
 
   const addExercise = () => {
     const newExercise: WorkoutExercise = {
-  id: crypto.randomUUID(),
-  exerciseId: '',
-  exerciseName: '',
-  muscleGroup: 'Peito' as MuscleGroup,
-  sourceMode: 'bank',
-  sets: [{ reps: 10, weight: 0 }],
-  rpe: 7,
-}
-    setExercises([...exercises, newExercise])
+      id: crypto.randomUUID(),
+      exerciseId: '',
+      exerciseName: '',
+      muscleGroup: 'Peito' as MuscleGroup,
+      sourceMode: 'bank',
+      sets: [{ reps: 10, weight: 0 }],
+      rpe: 7,
+    }
+    setExercises((prev) => [...prev, newExercise])
   }
 
   const removeExercise = (id: string) => {
-    setExercises(exercises.filter((e) => e.id !== id))
+    setExercises((prev) => prev.filter((e) => e.id !== id))
   }
 
   const updateExercise = (id: string, updates: Partial<WorkoutExercise>) => {
-    setExercises(exercises.map((e) => (e.id === id ? { ...e, ...updates } : e)))
+    setExercises((prev) => prev.map((e) => (e.id === id ? { ...e, ...updates } : e)))
   }
 
   const addSet = (exerciseId: string) => {
-    setExercises(
-      exercises.map((e) => {
+    setExercises((prev) =>
+      prev.map((e) => {
         if (e.id === exerciseId) {
           const lastSet = e.sets[e.sets.length - 1]
           return {
@@ -381,8 +654,8 @@ export function WorkoutForm({
   }
 
   const removeSet = (exerciseId: string, setIndex: number) => {
-    setExercises(
-      exercises.map((e) => {
+    setExercises((prev) =>
+      prev.map((e) => {
         if (e.id === exerciseId) {
           return {
             ...e,
@@ -395,8 +668,8 @@ export function WorkoutForm({
   }
 
   const updateSet = (exerciseId: string, setIndex: number, updates: Partial<WorkoutSet>) => {
-    setExercises(
-      exercises.map((e) => {
+    setExercises((prev) =>
+      prev.map((e) => {
         if (e.id === exerciseId) {
           return {
             ...e,
@@ -409,63 +682,51 @@ export function WorkoutForm({
   }
 
   const handleExerciseSelect = (exerciseId: string, workoutExerciseId: string) => {
-  const ex = dbExercisesById.get(exerciseId)
-  if (ex) {
-    updateExercise(workoutExerciseId, {
-      sourceMode: 'bank',
-      exerciseId: ex.id,
-      exerciseName: ex.name,
-      muscleGroup: normalizeMuscleGroup(ex.muscle_group),
-    })
+    const ex = dbExercisesById.get(exerciseId)
+    if (ex) {
+      updateExercise(workoutExerciseId, {
+        sourceMode: 'bank',
+        exerciseId: ex.id,
+        exerciseName: ex.name,
+        muscleGroup: normalizeMuscleGroup(ex.muscle_group),
+      })
+    }
   }
-}
 
   const handleCustomExerciseNameChange = (workoutExerciseId: string, exerciseName: string) => {
-  updateExercise(workoutExerciseId, {
-    sourceMode: 'custom',
-    exerciseId: '',
-    exerciseName,
-  })
-}
-
-  const handleSourceModeChange = (workoutExerciseId: string, mode: ExerciseSourceMode) => {
-  const current = exercises.find((exercise) => exercise.id === workoutExerciseId)
-  if (!current) return
-
-  if (mode === 'bank') {
     updateExercise(workoutExerciseId, {
-      sourceMode: 'bank',
+      sourceMode: 'custom',
       exerciseId: '',
-      exerciseName: '',
+      exerciseName,
     })
-    return
   }
 
-  updateExercise(workoutExerciseId, {
-    sourceMode: 'custom',
-    exerciseId: '',
-    exerciseName: current.exerciseName || '',
-  })
-}
+  const handleSourceModeChange = (workoutExerciseId: string, mode: ExerciseSourceMode) => {
+    const current = exercises.find((exercise) => exercise.id === workoutExerciseId)
+    if (!current) return
+
+    if (mode === 'bank') {
+      updateExercise(workoutExerciseId, {
+        sourceMode: 'bank',
+        exerciseId: '',
+        exerciseName: '',
+      })
+      return
+    }
+
+    updateExercise(workoutExerciseId, {
+      sourceMode: 'custom',
+      exerciseId: '',
+      exerciseName: current.exerciseName || '',
+    })
+  }
 
   const handleDateChange = (value: string) => {
     setDate(value)
     setWeekDay(getWeekDayFromDateString(value))
+    setProgramExercises([])
     setLastAutoLoadedKey(null)
   }
-
-  const todaySplitGroups = (activeSplitDay?.muscle_groups ?? []).filter(Boolean)
-  const isSplitRestDay =
-    !!activeSplitDay &&
-    todaySplitGroups.length === 0 &&
-    (activeSplitDay.day_title ?? '').toLowerCase().includes('descanso')
-
-  const canSuggestFromSplit =
-    !activeProgramId &&
-    !!activeSplitDay &&
-    !isSplitRestDay &&
-    todaySplitGroups.length > 0 &&
-    exercises.length === 0
 
   const applySplitSuggestions = () => {
     if (!canSuggestFromSplit) return
@@ -483,6 +744,7 @@ export function WorkoutForm({
         sets: [{ reps: 10, weight: 0 }],
         rpe: 7,
         notes: `Sugestão do split: ${group}`,
+        sourceMode: matchedExercise?.id ? 'bank' : 'custom',
       }
     })
 
@@ -490,7 +752,56 @@ export function WorkoutForm({
     toast.success('Sugestões do split aplicadas!')
   }
 
-  const handleSubmit = () => {
+  const addProgramExerciseToRegister = (item: ProgramSuggestedExercise) => {
+    const dedupeKey = normalizeExerciseLookupKey(item.sourceExerciseId || item.exerciseName)
+    if (programAddedKeys.has(dedupeKey)) {
+      toast.info('Esse exercício já está na área de registro.')
+      return
+    }
+
+    const newExercise: WorkoutExercise = {
+      id: crypto.randomUUID(),
+      exerciseId: item.sourceExerciseId,
+      exerciseName: item.exerciseName,
+      muscleGroup: item.muscleGroup,
+      sets: item.sets.map((set) => ({ ...set })),
+      rpe: 7,
+      notes: item.notes,
+      sourceMode: item.sourceMode,
+    }
+
+    setExercises((prev) => [...prev, newExercise])
+  }
+
+  const addAllProgramExercisesToRegister = () => {
+    const pending = programExercises.filter((item) => {
+      const key = normalizeExerciseLookupKey(item.sourceExerciseId || item.exerciseName)
+      return !programAddedKeys.has(key)
+    })
+
+    if (pending.length === 0) {
+      toast.info('Todos os exercícios do programa já foram adicionados.')
+      return
+    }
+
+    const mapped: WorkoutExercise[] = pending.map((item) => ({
+      id: crypto.randomUUID(),
+      exerciseId: item.sourceExerciseId,
+      exerciseName: item.exerciseName,
+      muscleGroup: item.muscleGroup,
+      sets: item.sets.map((set) => ({ ...set })),
+      rpe: 7,
+      notes: item.notes,
+      sourceMode: item.sourceMode,
+    }))
+
+    setExercises((prev) => [...prev, ...mapped])
+    toast.success(`${mapped.length} exercício(s) adicionados ao registro.`)
+  }
+
+  const handleSubmit = async () => {
+    if (isSaving) return
+
     if (exercises.length === 0) {
       toast.error('Adicione pelo menos um exercício')
       return
@@ -501,29 +812,36 @@ export function WorkoutForm({
       return
     }
 
-    const totalVolume = exercises.reduce((total, ex) => total + calculateExerciseVolume(ex), 0)
+    try {
+      setIsSaving(true)
 
-    const workout: WorkoutSession = {
-      id: crypto.randomUUID(),
-      date,
-      weekDay: weekDay as WeekDay,
-      exercises,
-      totalVolume,
-      createdAt: Date.now(),
+      const totalVolume = exercises.reduce((total, ex) => total + calculateExerciseVolume(ex), 0)
+
+      const workout: WorkoutSession = {
+        id: crypto.randomUUID(),
+        date,
+        weekDay: weekDay as WeekDay,
+        exercises,
+        totalVolume,
+        createdAt: Date.now(),
+      }
+
+      await Promise.resolve(onSave(workout))
+
+      toast.success(
+        activeProgramId
+          ? 'Treino salvo! O histórico já pode ser usado no progresso do programa.'
+          : 'Treino salvo com sucesso!'
+      )
+
+      setExercises([])
+      setProgramExercises([])
+      setLastAutoLoadedKey(null)
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao salvar treino.')
+    } finally {
+      setIsSaving(false)
     }
-
-    onSave(workout)
-    toast.success(
-      activeProgramId
-        ? 'Treino salvo! O histórico já pode ser usado no progresso do programa.'
-        : 'Treino salvo com sucesso!'
-    )
-
-    const today = getTodayLocalDateString()
-    setDate(today)
-    setWeekDay(getWeekDayFromDateString(today))
-    setExercises([])
-    setLastAutoLoadedKey(null)
   }
 
   return (
@@ -564,6 +882,38 @@ export function WorkoutForm({
         </Card>
       )}
 
+      {!injuryLoading && injuryAlerts.length > 0 && (
+        <Card className="border-red-500/30 bg-red-500/10">
+          <CardContent className="pt-6">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="bg-red-500/20 text-red-300">
+                  Atenção para lesões
+                </Badge>
+
+                {injuryAlerts.map((injury) => (
+                  <Badge
+                    key={injury.id}
+                    variant="outline"
+                    className={
+                      injury.status === 'active'
+                        ? 'border-red-500/30 text-red-300'
+                        : 'border-orange-500/30 text-orange-300'
+                    }
+                  >
+                    {injury.bodyPart} • {injury.status === 'active' ? 'Ativa' : 'Crônica'}
+                  </Badge>
+                ))}
+              </div>
+
+              <p className="text-sm text-red-100">
+                Revise os exercícios do treino e do programa antes de registrar. Detectamos áreas que exigem atenção.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {activeSplit && (
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="pt-6">
@@ -586,17 +936,129 @@ export function WorkoutForm({
               </div>
 
               {activeSplitDay && (
-                <div className="flex flex-wrap gap-2">
-                  {isSplitRestDay ? (
-                    <Badge variant="secondary">Descanso</Badge>
-                  ) : todaySplitGroups.length > 0 ? (
-                    todaySplitGroups.map((group) => (
-                      <Badge key={group} variant="secondary">{group}</Badge>
-                    ))
-                  ) : (
-                    <span className="text-sm text-muted-foreground">Sem grupos musculares definidos.</span>
+                <>
+                  {hasSplitConflicts && (
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300">
+                          Atenção no split
+                        </Badge>
+
+                        {splitConflictGroups.map((entry) => (
+                          <Badge key={entry.group} variant="outline" className="border-amber-500/30 text-amber-300">
+                            {entry.group}
+                          </Badge>
+                        ))}
+                      </div>
+
+                      <p className="mt-2 text-sm text-amber-100">
+                        O foco de hoje do split encosta em áreas com lesão registrada.
+                      </p>
+                    </div>
                   )}
-                </div>
+
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {isSplitRestDay ? (
+                        <Badge variant="secondary">Descanso</Badge>
+                      ) : todaySplitGroups.length > 0 ? (
+                        todaySplitGroups.map((group) => {
+                          const conflicts = getConflictingInjuries({
+                            muscleGroup: group,
+                            exerciseName: group,
+                            injuries: injuryAlerts,
+                          })
+
+                          return (
+                            <div key={group} className="flex items-center gap-2">
+                              <Badge variant="secondary">{group}</Badge>
+
+                              {conflicts.length > 0 && (
+                                <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
+                                  Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
+                                </Badge>
+                              )}
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Sem grupos musculares definidos.</span>
+                      )}
+                    </div>
+
+                    {hasProgramSuggestions && (
+                      <div className="rounded-xl border border-primary/20 bg-background/30 p-4">
+                        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-white">Treino do dia do programa</div>
+                            <p className="text-xs text-muted-foreground">
+                              Escolha 1 por 1 ou puxe todos para a área de registro.
+                            </p>
+                          </div>
+
+                          <Button onClick={addAllProgramExercisesToRegister} variant="outline" className="gap-2">
+                            <Plus className="h-4 w-4" />
+                            Adicionar todos
+                          </Button>
+                        </div>
+
+                        <div className="space-y-3">
+                          {programExercises.map((item) => {
+                            const dedupeKey = normalizeExerciseLookupKey(item.sourceExerciseId || item.exerciseName)
+                            const alreadyAdded = programAddedKeys.has(dedupeKey)
+                            const conflicts = getConflictingInjuries({
+                              muscleGroup: item.muscleGroup,
+                              exerciseName: item.exerciseName,
+                              injuries: injuryAlerts,
+                            })
+
+                            return (
+                              <div
+                                key={item.planItemId}
+                                className="rounded-lg border border-border/60 bg-background/40 px-4 py-3"
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="text-sm font-medium text-white">{item.exerciseName}</div>
+
+                                      {conflicts.length > 0 && (
+                                        <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
+                                          Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
+                                        </Badge>
+                                      )}
+                                    </div>
+
+                                    <div className="text-xs text-muted-foreground">{buildExerciseMeta(item.sets)}</div>
+
+                                    {conflicts.length > 0 && (
+                                      <div className="mt-1 text-xs text-amber-200">
+                                        Revise esse exercício antes de adicionar ao registro.
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <ExerciseHelpMenu exerciseName={item.exerciseName} />
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant={alreadyAdded ? 'secondary' : 'outline'}
+                                      disabled={alreadyAdded}
+                                      onClick={() => addProgramExerciseToRegister(item)}
+                                    >
+                                      {alreadyAdded ? 'Já adicionado' : 'Adicionar treino'}
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </CardContent>
@@ -675,11 +1137,14 @@ export function WorkoutForm({
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Exercícios</h2>
-          <Button onClick={addExercise} variant="outline" className="gap-2">
-            <Plus className="w-4 h-4" />
-            Adicionar Exercício
-          </Button>
+          <h2 className="text-lg font-semibold text-white">Área de registro</h2>
+
+          {!hasProgramSuggestions && (
+            <Button onClick={addExercise} variant="outline" className="gap-2">
+              <Plus className="w-4 h-4" />
+              Adicionar Exercício
+            </Button>
+          )}
         </div>
 
         {exercises.length === 0 && (
@@ -687,7 +1152,9 @@ export function WorkoutForm({
             <CardContent className="py-8 text-center">
               <Dumbbell className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
               <p className="text-muted-foreground">
-                Nenhum exercício adicionado. Clique no botão acima para começar.
+                {hasProgramSuggestions
+                  ? 'Adicione exercícios do programa acima para começar o registro.'
+                  : 'Nenhum exercício adicionado. Clique no botão acima para começar.'}
               </p>
             </CardContent>
           </Card>
@@ -696,11 +1163,19 @@ export function WorkoutForm({
         {exercises.map((exercise, exIndex) => {
           const sourceMode = inferSourceMode(exercise)
 
+          const conflicts = getConflictingInjuries({
+            muscleGroup: exercise.muscleGroup,
+            exerciseName: exercise.exerciseName,
+            injuries: injuryAlerts,
+          })
+
           return (
             <Card key={exercise.id} className="border-border bg-card">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base text-white">Exercício {exIndex + 1}</CardTitle>
+                  <CardTitle className="text-base text-white">
+                    {exercise.exerciseName || `Exercício ${exIndex + 1}`}
+                  </CardTitle>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -713,74 +1188,106 @@ export function WorkoutForm({
               </CardHeader>
 
               <CardContent className="space-y-4">
-                <div className="space-y-3">
-                  <Label>Origem do exercício</Label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant={sourceMode === 'bank' ? 'default' : 'outline'}
-                      onClick={() => handleSourceModeChange(exercise.id, 'bank')}
-                    >
-                      Usar banco de exercícios
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={sourceMode === 'custom' ? 'default' : 'outline'}
-                      onClick={() => handleSourceModeChange(exercise.id, 'custom')}
-                    >
-                      Exercício personalizado
-                    </Button>
-                  </div>
-                </div>
-
-                {sourceMode === 'bank' ? (
-                  <div className="space-y-2">
-                    <Label>Exercício</Label>
-                    <ExercisePicker
-                      options={exercisePickerOptions}
-                      value={exercise.exerciseId || null}
-                      onValueChange={(exerciseId) => handleExerciseSelect(exerciseId, exercise.id)}
-                      placeholder="Buscar por nome, grupo, equipamento..."
-                    />
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Nome do exercício</Label>
-                      <Input
-                        value={exercise.exerciseName || ''}
-                        onChange={(e) => handleCustomExerciseNameChange(exercise.id, e.target.value)}
-                        placeholder="Ex: Dead bug com pausa"
-                        className="bg-background border-border"
-                      />
+                {!hasProgramSuggestions && (
+                  <>
+                    <div className="space-y-3">
+                      <Label>Origem do exercício</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant={sourceMode === 'bank' ? 'default' : 'outline'}
+                          onClick={() => handleSourceModeChange(exercise.id, 'bank')}
+                        >
+                          Usar banco de exercícios
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={sourceMode === 'custom' ? 'default' : 'outline'}
+                          onClick={() => handleSourceModeChange(exercise.id, 'custom')}
+                        >
+                          Exercício personalizado
+                        </Button>
+                      </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label>Grupo muscular</Label>
-                      <Select
-                        value={exercise.muscleGroup}
-                        onValueChange={(value) =>
-                          updateExercise(exercise.id, { muscleGroup: value as MuscleGroup })
-                        }
-                      >
-                        <SelectTrigger className="bg-background border-border">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Peito">Peito</SelectItem>
-                          <SelectItem value="Costas">Costas</SelectItem>
-                          <SelectItem value="Ombros">Ombros</SelectItem>
-                          <SelectItem value="Bíceps">Bíceps</SelectItem>
-                          <SelectItem value="Tríceps">Tríceps</SelectItem>
-                          <SelectItem value="Pernas">Pernas</SelectItem>
-                          <SelectItem value="Glúteos">Glúteos</SelectItem>
-                          <SelectItem value="Posterior">Posterior</SelectItem>
-                          <SelectItem value="Core">Core</SelectItem>
-                          <SelectItem value="Cardio">Cardio</SelectItem>
-                          <SelectItem value="Mobilidade">Mobilidade</SelectItem>
-                        </SelectContent>
-                      </Select>
+                    {sourceMode === 'bank' ? (
+                      <div className="space-y-2">
+                        <Label>Exercício</Label>
+                        <ExercisePicker
+                          options={exercisePickerOptions}
+                          value={exercise.exerciseId || null}
+                          onValueChange={(exerciseId) => handleExerciseSelect(exerciseId, exercise.id)}
+                          placeholder="Buscar por nome, grupo, equipamento..."
+                        />
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Nome do exercício</Label>
+                          <Input
+                            value={exercise.exerciseName || ''}
+                            onChange={(e) => handleCustomExerciseNameChange(exercise.id, e.target.value)}
+                            placeholder="Ex: Dead bug com pausa"
+                            className="bg-background border-border"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Grupo muscular</Label>
+                          <Select
+                            value={exercise.muscleGroup}
+                            onValueChange={(value) =>
+                              updateExercise(exercise.id, { muscleGroup: value as MuscleGroup })
+                            }
+                          >
+                            <SelectTrigger className="bg-background border-border">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Peito">Peito</SelectItem>
+                              <SelectItem value="Costas">Costas</SelectItem>
+                              <SelectItem value="Ombros">Ombros</SelectItem>
+                              <SelectItem value="Bíceps">Bíceps</SelectItem>
+                              <SelectItem value="Tríceps">Tríceps</SelectItem>
+                              <SelectItem value="Pernas">Pernas</SelectItem>
+                              <SelectItem value="Glúteos">Glúteos</SelectItem>
+                              <SelectItem value="Posterior">Posterior</SelectItem>
+                              <SelectItem value="Core">Core</SelectItem>
+                              <SelectItem value="Cardio">Cardio</SelectItem>
+                              <SelectItem value="Mobilidade">Mobilidade</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+
+                    {conflicts.length > 0 && (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                        Atenção: este exercício pode afetar <strong>{conflicts.map((conflict) => conflict.bodyPart).join(', ')}</strong>.
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {hasProgramSuggestions && (
+                  <div className="rounded-lg border border-border/60 bg-background/40 px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>
+                        {exercise.exerciseId ? 'Exercício do banco' : 'Exercício personalizado'} • {exercise.muscleGroup}
+                      </span>
+
+                      {conflicts.length > 0 && (
+                        <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
+                          Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
+                        </Badge>
+                      )}
                     </div>
+
+                    {conflicts.length > 0 && (
+                      <div className="mt-1 text-xs text-amber-200">
+                        Este exercício pode envolver uma região com lesão registrada.
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -890,9 +1397,9 @@ export function WorkoutForm({
 
       {exercises.length > 0 && (
         <div className="flex justify-end">
-          <Button onClick={handleSubmit} size="lg" className="gap-2">
+          <Button onClick={handleSubmit} size="lg" className="gap-2" disabled={isSaving}>
             <Save className="w-5 h-5" />
-            Salvar Treino
+            {isSaving ? 'Salvando...' : 'Salvar Treino'}
           </Button>
         </div>
       )}

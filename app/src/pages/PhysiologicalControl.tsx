@@ -1,5 +1,6 @@
+//academy\app\src\pages\PhysiologicalControl.tsx
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, Moon, Save, Heart, Wind, Droplets, History, User } from 'lucide-react'
+import { Activity, Moon, Save, Heart, Wind, Droplets, History, User, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -64,6 +65,8 @@ export function PhysiologicalControl({
 
   const [historyLoading, setHistoryLoading] = useState(true)
   const [history, setHistory] = useState<PhysiologicalData[]>([])
+  const [expandedIds, setExpandedIds] = useState<string[]>([])
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const sleepTotalHours = parseTimeToDecimal(sleepTotal)
 
@@ -139,6 +142,39 @@ export function PhysiologicalControl({
     setFatigue(5)
     setNotes('')
   }
+
+  const toggleExpanded = (id: string) => {
+  setExpandedIds((prev) =>
+    prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+  )
+}
+
+const handleDeletePhysio = async (entryId: string) => {
+  if (!effectiveUserId) return
+
+  const confirmed = window.confirm('Tem certeza que deseja excluir este registro fisiológico?')
+  if (!confirmed) return
+
+  try {
+    setDeletingId(entryId)
+
+    const { error } = await supabase
+      .from('physio_entries')
+      .delete()
+      .eq('id', entryId)
+      .eq('user_id', effectiveUserId)
+
+    if (error) throw error
+
+    setHistory((prev) => prev.filter((item) => item.id !== entryId))
+    setExpandedIds((prev) => prev.filter((id) => id !== entryId))
+    toast.success('Registro fisiológico excluído com sucesso ✅')
+  } catch (e: any) {
+    toast.error(e?.message ?? 'Erro ao excluir registro fisiológico.')
+  } finally {
+    setDeletingId(null)
+  }
+}
 
   const handleSubmit = () => {
     if (isStudentMode) {
@@ -481,63 +517,207 @@ export function PhysiologicalControl({
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">Data</TableHead>
-                  <TableHead className="text-muted-foreground">Peso</TableHead>
-                  <TableHead className="text-muted-foreground">FC Repouso</TableHead>
-                  <TableHead className="text-muted-foreground">Sono</TableHead>
-                  <TableHead className="text-muted-foreground">SpO2</TableHead>
-                  <TableHead className="text-muted-foreground">Cansaço</TableHead>
-                </TableRow>
-              </TableHeader>
+  <TableHeader>
+    <TableRow className="border-border hover:bg-transparent">
+      <TableHead className="text-muted-foreground">Abrir</TableHead>
+      <TableHead className="text-muted-foreground">Data</TableHead>
+      <TableHead className="text-muted-foreground">Peso</TableHead>
+      <TableHead className="text-muted-foreground">FC Repouso</TableHead>
+      <TableHead className="text-muted-foreground">Sono</TableHead>
+      <TableHead className="text-muted-foreground">SpO2</TableHead>
+      <TableHead className="text-muted-foreground">Cansaço</TableHead>
+      <TableHead className="text-right text-muted-foreground">Ações</TableHead>
+    </TableRow>
+  </TableHeader>
 
-              <TableBody>
-                {history.map((h) => (
-                  <TableRow key={h.id} className="border-border">
-                    <TableCell className="text-white">
-                      {formatLocalDate(h.date, (d) => format(d, 'dd/MM/yyyy'))}
-                    </TableCell>
-                    <TableCell className="text-white">
-                      {h.weight !== undefined ? `${h.weight.toFixed(1)} kg` : '-'}
-                    </TableCell>
-                    <TableCell className="text-white">{h.restingHeartRate ?? '-'}</TableCell>
-                    <TableCell className="text-white">
-                      {h.sleepTotalHours !== undefined ? (
-                        <span>
-                          {h.sleepTotalHours.toFixed(1)}h{' '}
-                          <span className="text-muted-foreground">({h.sleepTotal})</span>
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
-                    <TableCell className="text-white">{h.spo2 ?? '-'}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="text-xs">
-                        {h.fatigue ?? 5}/10
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
+  <TableBody>
+    {history.map((h) => {
+      const isExpanded = expandedIds.includes(h.id)
 
-                {!historyLoading && history.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                      Nenhum registro fisiológico ainda
-                    </TableCell>
-                  </TableRow>
-                )}
+      return (
+        <>
+          <TableRow
+            key={h.id}
+            className="cursor-pointer border-border transition-colors hover:bg-white/5"
+            onClick={() => toggleExpanded(h.id)}
+          >
+            <TableCell className="text-white">
+              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </TableCell>
 
-                {historyLoading && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                      Carregando histórico...
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+            <TableCell className="text-white">
+              {formatLocalDate(h.date, (d) => format(d, 'dd/MM/yyyy'))}
+            </TableCell>
+
+            <TableCell className="text-white">
+              {h.weight !== undefined ? `${h.weight.toFixed(1)} kg` : '-'}
+            </TableCell>
+
+            <TableCell className="text-white">
+              {h.restingHeartRate ?? '-'}
+            </TableCell>
+
+            <TableCell className="text-white">
+              {h.sleepTotalHours !== undefined ? (
+                <span>
+                  {h.sleepTotalHours.toFixed(1)}h{' '}
+                  <span className="text-muted-foreground">({h.sleepTotal})</span>
+                </span>
+              ) : (
+                '-'
+              )}
+            </TableCell>
+
+            <TableCell className="text-white">{h.spo2 ?? '-'}</TableCell>
+
+            <TableCell>
+              <Badge variant="secondary" className="text-xs">
+                {h.fatigue ?? 5}/10
+              </Badge>
+            </TableCell>
+
+            <TableCell className="text-right">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                disabled={deletingId === h.id}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void handleDeletePhysio(h.id)
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TableCell>
+          </TableRow>
+
+          {isExpanded && (
+            <TableRow className="border-border bg-white/[0.03]">
+              <TableCell colSpan={8}>
+                <div className="space-y-4 py-2">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Data</p>
+                      <p className="mt-1 text-sm font-semibold text-white">
+                        {formatLocalDate(h.date, (d) => format(d, 'dd/MM/yyyy'))}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Peso</p>
+                      <p className="mt-1 text-sm font-semibold text-white">
+                        {h.weight !== undefined ? `${h.weight.toFixed(1)} kg` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">FC Repouso</p>
+                      <p className="mt-1 text-sm font-semibold text-white">
+                        {h.restingHeartRate !== undefined ? `${h.restingHeartRate} bpm` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">FC Sono</p>
+                      <p className="mt-1 text-sm font-semibold text-white">
+                        {h.sleepHeartRate !== undefined ? `${h.sleepHeartRate} bpm` : '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Sono Total</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.sleepTotalHours !== undefined ? `${h.sleepTotalHours.toFixed(1)}h` : '-'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{h.sleepTotal || '-'}</p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">REM</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.sleepREM !== undefined ? `${h.sleepREM} min` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Sono Leve</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.sleepLight !== undefined ? `${h.sleepLight} min` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Sono Profundo</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.sleepDeep !== undefined ? `${h.sleepDeep} min` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Acordado</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.awakeTime !== undefined ? `${h.awakeTime} min` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Cansaço</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.fatigue !== undefined ? `${h.fatigue}/10` : '5/10'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">SpO2</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.spo2 !== undefined ? `${h.spo2}%` : '-'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Respiração</p>
+                      <p className="mt-1 text-sm text-white">
+                        {h.respiratoryRate !== undefined ? `${h.respiratoryRate} rpm` : '-'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {h.notes && (
+                    <div className="rounded-xl border border-border bg-background/40 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Observações</p>
+                      <p className="mt-1 text-sm text-white">{h.notes}</p>
+                    </div>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          )}
+        </>
+      )
+    })}
+
+    {!historyLoading && history.length === 0 && (
+      <TableRow>
+        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+          Nenhum registro fisiológico ainda
+        </TableCell>
+      </TableRow>
+    )}
+
+    {historyLoading && (
+      <TableRow>
+        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+          Carregando histórico...
+        </TableCell>
+      </TableRow>
+    )}
+  </TableBody>
+</Table>
           </div>
         </CardContent>
       </Card>

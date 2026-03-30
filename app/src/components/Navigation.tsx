@@ -1,3 +1,4 @@
+// academy\app\src\components\Navigation.tsx
 import {
   LayoutDashboard,
   Dumbbell,
@@ -90,6 +91,14 @@ export function Navigation({
 
   const visibleItems = navItems
 
+  const displayName =
+  profile?.full_name?.trim() ||
+  profile?.email?.trim() ||
+  'Usuário'
+
+  const roleLabel =
+    role === 'admin' ? 'Administrador' : role === 'coach' ? 'Professor' : 'Aluno'
+
   const renderNavButton = (item: NavItem) => {
     const Icon = item.icon
     const isActive = currentPage === item.id
@@ -99,13 +108,13 @@ export function Navigation({
         <button
           onClick={() => onPageChange(item.id)}
           className={cn(
-            'w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200',
+            'group w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium transition-all duration-200',
             isActive
-              ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20'
-              : 'text-muted-foreground hover:text-white hover:bg-muted'
+  ? 'bg-primary text-primary-foreground shadow-[0_10px_30px_-12px_hsl(var(--primary))]'
+  : 'text-white/65 hover:bg-white/[0.04] hover:text-white'
           )}
         >
-          <Icon className={cn('w-5 h-5', isActive && 'text-white')} />
+          <Icon className={cn('h-5 w-5 transition-transform duration-200', isActive ? 'text-white' : 'text-white/70 group-hover:text-white')} />
           {item.label}
         </button>
       </li>
@@ -115,18 +124,26 @@ export function Navigation({
   return (
     <>
       <aside className="sticky top-0 hidden h-screen w-64 flex-col border-r border-border bg-card lg:flex">
-        <div className="p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600">
-              <Dumbbell className="h-5 w-5 text-white" />
-            </div>
+        <div className="border-b border-white/5 px-5 py-5">
+          <div className="flex items-center gap-3 rounded-2xl bg-white/[0.02] px-3 py-3 ring-1 ring-white/5">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white/10 to-white/[0.03] shadow-lg ring-1 ring-white/10">
+  <img
+    src="/academyk-ak.png"
+    alt="AcademyK AK"
+    className="h-8 w-8 object-contain"
+  />
+</div>
 
-            <div>
-              <h1 className="text-lg font-bold text-white">AcademyK</h1>
-              <p className="text-xs text-muted-foreground">
-                {role === 'admin' ? 'Admin' : role === 'coach' ? 'Professor' : 'Pro'}
-              </p>
-            </div>
+            <div className="min-w-0 flex-1">
+  <img
+    src="/academyk-logo.png"
+    alt="AcademyK"
+    className="h-7 w-auto max-w-[145px] object-contain"
+  />
+  <p className="mt-1.5 truncate text-xs font-medium text-white/70">
+    {displayName}
+  </p>
+</div>
           </div>
 
           {isStudentMode && (
@@ -170,7 +187,7 @@ export function Navigation({
         </div>
 
         <nav
-          className="ft-sidebar-scroll flex-1 overflow-y-auto px-4 py-4"
+            className="ft-sidebar-scroll flex-1 overflow-y-auto px-3 py-4"
           style={{
             scrollbarWidth: 'thin',
             scrollbarColor: 'rgba(148,163,184,0.35) rgba(15,23,42,0.6)',
@@ -190,12 +207,12 @@ export function Navigation({
             `}
           </style>
 
-          <ul className="space-y-1">{visibleItems.map(renderNavButton)}</ul>
+          <ul className="space-y-1.5">{visibleItems.map(renderNavButton)}</ul>
 
           {(role === 'admin' || role === 'coach') && (
             <div className="mt-6">
               <p className="mb-2 px-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {role === 'admin' ? 'Admin' : 'Professor'}
+                {role === 'admin' ? 'Administração' : 'Professor'}
               </p>
               <ul className="space-y-1">
                 {role === 'admin' && adminItems.map(renderNavButton)}
@@ -209,7 +226,10 @@ export function Navigation({
           <div className="rounded-lg bg-muted p-4">
             <p className="mb-2 text-xs text-muted-foreground">Versão</p>
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium text-white">AcademyK v2.0</p>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-white">AcademyK v2.2</p>
+                <p className="truncate text-[11px] text-muted-foreground">{roleLabel}</p>
+              </div>
               {isStudentMode && (
                 <Badge variant="secondary" className="text-[10px]">
                   Aluno
@@ -221,8 +241,8 @@ export function Navigation({
       </aside>
 
       <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-lg lg:hidden">
-        <div className="flex items-center justify-around px-2 py-2">
-          {visibleItems.slice(0, 5).map((item) => {
+  <div className="flex items-center gap-2 overflow-x-auto px-3 py-2">
+          {visibleItems.map((item) => {
             const Icon = item.icon
             const isActive = currentPage === item.id
 
@@ -231,37 +251,19 @@ export function Navigation({
                 key={item.id}
                 onClick={() => onPageChange(item.id)}
                 className={cn(
-                  'flex flex-col items-center gap-1 rounded-lg px-3 py-2 transition-all duration-200',
+                  'flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-3 py-2 transition-all duration-200',
                   isActive ? 'text-primary' : 'text-muted-foreground'
                 )}
               >
                 <div className={cn('rounded-lg p-1.5 transition-all', isActive && 'bg-primary/20')}>
                   <Icon className="h-5 w-5" />
                 </div>
-                <span className="text-[10px] font-medium">{item.label}</span>
+                <span className="text-[11px]">{item.label}</span>
               </button>
             )
           })}
         </div>
       </nav>
-
-      <div className="fixed right-4 top-4 z-50 flex items-center gap-2 lg:hidden">
-        {isStudentMode && onExitStudentMode && (
-          <button
-            onClick={onExitStudentMode}
-            className="max-w-[200px] rounded-full border border-primary/30 bg-primary/10 px-3 py-2 text-xs text-primary"
-          >
-            Consulta: {selectedStudentName} • Sair
-          </button>
-        )}
-
-        <button
-          onClick={() => onPageChange('settings')}
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:text-white"
-        >
-          <Settings className="h-5 w-5" />
-        </button>
-      </div>
     </>
   )
 }
