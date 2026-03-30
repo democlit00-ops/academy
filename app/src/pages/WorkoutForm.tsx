@@ -9,8 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import type { WorkoutSession, WorkoutExercise, WorkoutSet, WeekDay, MuscleGroup } from '@/types'
-import { calculateExerciseVolume } from '@/lib/calculations'
+import type { WorkoutSession, WorkoutExercise, WorkoutSet, WeekDay, MuscleGroup, ExerciseTrackingMode } from '@/types'
+import { calculateExerciseVolume, formatDurationSeconds } from '@/lib/calculations'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { supabase } from '@/lib/supabase'
@@ -23,6 +23,7 @@ interface WorkoutFormProps {
   onSave: (workout: WorkoutSession) => void
   selectedUserId?: string | null
   selectedUserLabel?: string | null
+  onOpenCardio?: () => void
 }
 
 type DbExercise = {
@@ -83,6 +84,15 @@ type ProgramSuggestedExercise = {
   notes?: string
   sets: WorkoutSet[]
   sourceMode: ExerciseSourceMode
+  trackingMode: ExerciseTrackingMode
+}
+
+type ProgramSuggestedCardio = {
+  planItemId: string
+  sortOrder: number
+  exerciseName: string
+  durationMin: number
+  notes?: string
 }
 
 type DbInjuryRow = {
@@ -263,7 +273,17 @@ function resolvePrefilledSets(
   }))
 }
 
-function buildExerciseMeta(sets: WorkoutSet[]) {
+function inferTrackingMode(category?: string | null, muscleGroup?: string | null, durationMin?: number | null): ExerciseTrackingMode {
+  const cat = String(category ?? '').toLowerCase()
+  const mg = String(muscleGroup ?? '').toLowerCase()
+  if (durationMin && durationMin > 0) return 'mobility'
+  if (cat.includes('mobilidade') || cat.includes('core') || mg.includes('mobilidade') || mg.includes('core')) {
+    return 'mobility'
+  }
+  return 'strength'
+}
+
+function buildExerciseMeta(sets: WorkoutSet[], trackingMode: ExerciseTrackingMode = 'strength') {
   const setsCount = sets.length
   const repsValues = sets
     .map((set) => Number(set.reps || 0))
@@ -278,6 +298,18 @@ function buildExerciseMeta(sets: WorkoutSet[]) {
         ? `${minReps} reps`
         : `${minReps}-${maxReps} reps`
       : 'Sem reps definidas'
+
+  if (trackingMode === 'mobility') {
+    const durationValues = sets.map((set) => Number(set.durationSec || 0)).filter((value) => value > 0)
+    const minDuration = durationValues.length ? Math.min(...durationValues) : 0
+    const maxDuration = durationValues.length ? Math.max(...durationValues) : 0
+    const durationLabel = minDuration && maxDuration
+      ? minDuration === maxDuration
+        ? formatDurationSeconds(minDuration)
+        : `${formatDurationSeconds(minDuration)}-${formatDurationSeconds(maxDuration)}`
+      : 'Sem tempo definido'
+    return `${setsCount} ${setsCount === 1 ? 'série' : 'séries'} • ${durationLabel}`
+  }
 
   return `${setsCount} ${setsCount === 1 ? 'série' : 'séries'} • ${repsLabel}`
 }
@@ -335,6 +367,7 @@ export function WorkoutForm({
   onSave,
   selectedUserId,
   selectedUserLabel,
+  onOpenCardio,
 }: WorkoutFormProps) {
   const { user } = useAuth()
   const isStudentMode = !!selectedUserId
@@ -345,6 +378,7 @@ export function WorkoutForm({
 
   const [exercises, setExercises] = useState<WorkoutExercise[]>([])
   const [programExercises, setProgramExercises] = useState<ProgramSuggestedExercise[]>([])
+  const [programCardioItems, setProgramCardioItems] = useState<ProgramSuggestedCardio[]>([])
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [dbExercises, setDbExercises] = useState<DbExercise[]>([])
@@ -528,6 +562,8 @@ export function WorkoutForm({
 
         if (!nextActiveProgramId) {
           setProgramExercises([])
+      setProgramCardioItems([])
+          setProgramCardioItems([])
           setLoadingPlan(false)
           return
         }
@@ -542,6 +578,8 @@ export function WorkoutForm({
         if (dayErr) throw dayErr
         if (!dayRow?.id) {
           setProgramExercises([])
+      setProgramCardioItems([])
+          setProgramCardioItems([])
           setLoadingPlan(false)
           return
         }
@@ -572,6 +610,7 @@ export function WorkoutForm({
 
         const planItems = (items ?? []) as unknown as DbPlanItem[]
         const strengthItems = planItems.filter((it) => it.block === 'strength')
+        const cardioItems = planItems.filter((it) => it.block === 'cardio')
 
         const mapped: ProgramSuggestedExercise[] = strengthItems.map((it) => {
           const exId = it.exercise_id ?? ''
@@ -589,7 +628,11 @@ export function WorkoutForm({
             (lookupById ? lastExerciseSetMap.get(lookupById) : undefined) ??
             (lookupByName ? lastExerciseSetMap.get(lookupByName) : undefined)
 
-          const sets = resolvePrefilledSets(setsCount, repsN, fallbackWeight, previousSets)
+          const trackingMode = inferTrackingMode(dbExercisesById.get(exId)?.category, it.muscle_group, it.duration_min)
+          const baseSets = resolvePrefilledSets(setsCount, repsN, fallbackWeight, previousSets)
+          const sets = trackingMode === 'mobility'
+            ? baseSets.map((set) => ({ ...set, weight: 0, durationSec: Math.max(0, Math.round((Number(it.duration_min) || 0) * 60)) }))
+            : baseSets
 
           return {
             planItemId: it.id,
@@ -600,10 +643,20 @@ export function WorkoutForm({
             notes: it.notes ?? undefined,
             sets,
             sourceMode: exId ? 'bank' : 'custom',
+            trackingMode,
           }
         })
 
-                setProgramExercises(mapped)
+        const mappedCardio: ProgramSuggestedCardio[] = cardioItems.map((it) => ({
+          planItemId: it.id,
+          sortOrder: it.sort_order,
+          exerciseName: it.exercises?.name ?? it.custom_exercise_name ?? 'Cardio',
+          durationMin: Number(it.duration_min) || 0,
+          notes: it.notes ?? undefined,
+        }))
+
+        setProgramExercises(mapped)
+        setProgramCardioItems(mappedCardio)
 
       } catch (e: any) {
         toast.error(e?.message ?? 'Erro ao carregar treino do dia do programa ativo.')
@@ -623,6 +676,7 @@ export function WorkoutForm({
       muscleGroup: 'Peito' as MuscleGroup,
       sourceMode: 'bank',
       sets: [{ reps: 10, weight: 0 }],
+      trackingMode: 'strength',
       rpe: 7,
     }
     setExercises((prev) => [...prev, newExercise])
@@ -643,7 +697,7 @@ export function WorkoutForm({
           const lastSet = e.sets[e.sets.length - 1]
           return {
             ...e,
-            sets: [...e.sets, { reps: lastSet?.reps || 10, weight: lastSet?.weight || 0 }],
+            sets: [...e.sets, e.trackingMode === 'mobility' ? { reps: lastSet?.reps || 0, weight: 0, durationSec: lastSet?.durationSec || 30 } : { reps: lastSet?.reps || 10, weight: lastSet?.weight || 0 }],
           }
         }
         return e
@@ -687,6 +741,7 @@ export function WorkoutForm({
         exerciseId: ex.id,
         exerciseName: ex.name,
         muscleGroup: normalizeMuscleGroup(ex.muscle_group),
+        trackingMode: inferTrackingMode(ex.category, ex.muscle_group),
       })
     }
   }
@@ -739,6 +794,7 @@ export function WorkoutForm({
         exerciseName: matchedExercise?.name ?? '',
         muscleGroup: normalizeMuscleGroup(group),
         sets: [{ reps: 10, weight: 0 }],
+        trackingMode: 'strength',
         rpe: 7,
         notes: `Sugestão do split: ${group}`,
         sourceMode: matchedExercise?.id ? 'bank' : 'custom',
@@ -765,6 +821,7 @@ export function WorkoutForm({
       rpe: 7,
       notes: item.notes,
       sourceMode: item.sourceMode,
+      trackingMode: item.trackingMode,
     }
 
     setExercises((prev) => [...prev, newExercise])
@@ -790,6 +847,7 @@ export function WorkoutForm({
       rpe: 7,
       notes: item.notes,
       sourceMode: item.sourceMode,
+      trackingMode: item.trackingMode,
     }))
 
     setExercises((prev) => [...prev, ...mapped])
@@ -833,6 +891,7 @@ export function WorkoutForm({
 
       setExercises([])
       setProgramExercises([])
+      setProgramCardioItems([])
       
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao salvar treino.')
@@ -1292,35 +1351,56 @@ export function WorkoutForm({
                   <Label>Séries</Label>
                   <div className="space-y-2">
                     {exercise.sets.map((set, setIndex) => (
-                      <div key={setIndex} className="flex items-center gap-2">
+                      <div key={setIndex} className="flex flex-wrap items-center gap-2">
                         <span className="w-12 text-sm text-muted-foreground">Série {setIndex + 1}</span>
-                        <Input
-                          type="number"
-                          placeholder="Reps"
-                          value={set.reps || ''}
-                          onChange={(e) =>
-                            updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
-                          }
-                          className="w-20 bg-background border-border"
-                        />
-                        <span className="text-muted-foreground">x</span>
-                        <Input
-                          type="number"
-                          placeholder="Kg"
-                          value={set.weight || ''}
-                          onChange={(e) =>
-                            updateSet(exercise.id, setIndex, { weight: parseFloat(e.target.value) || 0 })
-                          }
-                          className="w-24 bg-background border-border"
-                        />
-                        <span className="text-muted-foreground">kg</span>
+                        {exercise.trackingMode === 'mobility' ? (
+                          <>
+                            <Input
+                              type="number"
+                              placeholder="Reps"
+                              value={set.reps || ''}
+                              onChange={(e) =>
+                                updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
+                              }
+                              className="w-20 bg-background border-border"
+                            />
+                            <Input
+                              type="number"
+                              placeholder="Tempo (s)"
+                              value={set.durationSec || ''}
+                              onChange={(e) =>
+                                updateSet(exercise.id, setIndex, { durationSec: parseInt(e.target.value) || 0 })
+                              }
+                              className="w-28 bg-background border-border"
+                            />
+                            <span className="text-muted-foreground">seg</span>
+                          </>
+                        ) : (
+                          <>
+                            <Input
+                              type="number"
+                              placeholder="Reps"
+                              value={set.reps || ''}
+                              onChange={(e) =>
+                                updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
+                              }
+                              className="w-20 bg-background border-border"
+                            />
+                            <span className="text-muted-foreground">x</span>
+                            <Input
+                              type="number"
+                              placeholder="Kg"
+                              value={set.weight || ''}
+                              onChange={(e) =>
+                                updateSet(exercise.id, setIndex, { weight: parseFloat(e.target.value) || 0 })
+                              }
+                              className="w-24 bg-background border-border"
+                            />
+                            <span className="text-muted-foreground">kg</span>
+                          </>
+                        )}
                         {exercise.sets.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeSet(exercise.id, setIndex)}
-                            className="text-destructive"
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => removeSet(exercise.id, setIndex)} className="text-destructive">
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         )}

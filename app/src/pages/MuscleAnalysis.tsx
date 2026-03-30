@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { RadarChart, BarChart, PieChart } from '@/components/charts';
 import type { WorkoutSession, WeekDay, MuscleGroup } from '@/types';
 import { MUSCLE_GROUPS } from '@/data/exercises';
-import { calculateExerciseVolume, formatWeight } from '@/lib/calculations';
+import { calculateExerciseVolume, formatWeight, formatDurationSeconds } from '@/lib/calculations';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';

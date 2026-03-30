@@ -75,7 +75,10 @@ export interface ExerciseDefinition {
 export interface WorkoutSet {
   reps: number
   weight: number // em kg
+  durationSec?: number
 }
+
+export type ExerciseTrackingMode = 'strength' | 'mobility'
 
 export interface WorkoutExercise {
   id: string
@@ -83,6 +86,7 @@ export interface WorkoutExercise {
   exerciseName: string
   muscleGroup: MuscleGroup
   sourceMode?: 'bank' | 'custom'
+  trackingMode?: ExerciseTrackingMode
   sets: WorkoutSet[]
   rpe: number
   avgHeartRate?: number
@@ -158,11 +162,15 @@ export interface ExerciseProgress {
   exerciseId: string
   exerciseName: string
   muscleGroup: MuscleGroup
+  metricType: 'load' | 'duration'
   history: {
     date: string
     maxWeight: number
     totalVolume: number
     avgWeight: number
+    maxDurationSec?: number
+    totalDurationSec?: number
+    avgDurationSec?: number
   }[]
 }
 

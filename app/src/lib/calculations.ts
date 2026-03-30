@@ -59,7 +59,29 @@ export function decimalToTimeString(decimal: number): string {
 // CÁLCULOS DE TREINO
 // ============================================
 
+export function isDurationBasedExercise(exercise: WorkoutExercise): boolean {
+  if (exercise.trackingMode === 'mobility') return true;
+  return exercise.sets.some((set) => Number(set?.durationSec || 0) > 0);
+}
+
+export function getTotalDurationSecondsForExercise(exercise: WorkoutExercise): number {
+  return exercise.sets.reduce((total, set) => total + (Number(set?.durationSec) || 0), 0);
+}
+
+export function getMaxDurationSecondsForExercise(exercise: WorkoutExercise): number {
+  const values = exercise.sets.map((set) => Number(set?.durationSec) || 0).filter((value) => value > 0);
+  return values.length ? Math.max(...values) : 0;
+}
+
+export function getAverageDurationSecondsForExercise(exercise: WorkoutExercise): number {
+  const values = exercise.sets.map((set) => Number(set?.durationSec) || 0).filter((value) => value > 0);
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 export function calculateExerciseVolume(exercise: WorkoutExercise): number {
+  if (isDurationBasedExercise(exercise)) return 0;
+
   const DEFAULT_REPS_FALLBACK = 10;
 
   return exercise.sets.reduce((total, set) => {
@@ -295,11 +317,14 @@ export function calculateExerciseProgress(
     workout.exercises.forEach((ex) => {
       if (exerciseId && ex.exerciseId !== exerciseId) return;
 
+      const metricType = isDurationBasedExercise(ex) ? 'duration' : 'load';
+
       if (!progressMap[ex.exerciseId]) {
         progressMap[ex.exerciseId] = {
           exerciseId: ex.exerciseId,
           exerciseName: ex.exerciseName,
           muscleGroup: ex.muscleGroup,
+          metricType,
           history: [],
         };
       }
@@ -309,6 +334,9 @@ export function calculateExerciseProgress(
         maxWeight: getMaxWeightForExercise(ex),
         totalVolume: calculateExerciseVolume(ex),
         avgWeight: getAverageWeightForExercise(ex),
+        maxDurationSec: getMaxDurationSecondsForExercise(ex),
+        totalDurationSec: getTotalDurationSecondsForExercise(ex),
+        avgDurationSec: getAverageDurationSecondsForExercise(ex),
       });
     });
   });
@@ -419,8 +447,9 @@ export function formatDistance(km: number): string {
 }
 
 export function formatDuration(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const mins = safeMinutes % 60;
   if (hours > 0) {
     return `${hours}h ${mins}min`;
   }
@@ -429,4 +458,12 @@ export function formatDuration(minutes: number): string {
 
 export function formatNumber(num: number, decimals = 0): string {
   return num.toFixed(decimals);
+}
+export function formatDurationSeconds(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  if (minutes <= 0) return `${remainingSeconds}s`;
+  if (remainingSeconds === 0) return `${minutes} min`;
+  return `${minutes}min ${remainingSeconds}s`;
 }

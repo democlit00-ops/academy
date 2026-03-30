@@ -153,6 +153,7 @@ type NewItemForm = {
   zone_min_bpm: string
   zone_max_bpm: string
   notes: string
+  trackingMode: 'strength' | 'mobility' | 'cardio'
 }
 
 
@@ -327,6 +328,7 @@ const emptyNewItemForm = (): NewItemForm => ({
   zone_min_bpm: '',
   zone_max_bpm: '',
   notes: '',
+  trackingMode: 'strength',
 })
 
 export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutProgramsProps) {
@@ -384,6 +386,21 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     () => exerciseOptions.find((exercise) => exercise.id === newItemForm.selectedExerciseId) ?? null,
     [exerciseOptions, newItemForm.selectedExerciseId]
   )
+
+  useEffect(() => {
+    if (!selectedExercise || newItemForm.exerciseSourceMode !== 'existing') return
+
+    const nextTrackingMode = selectedExercise.type === 'cardio'
+      ? 'cardio'
+      : (selectedExercise.category === 'Mobilidade' || selectedExercise.category === 'Core' ? 'mobility' : 'strength')
+
+    setNewItemForm((prev) => ({
+      ...prev,
+      block: nextTrackingMode === 'cardio' ? 'cardio' : 'strength',
+      trackingMode: nextTrackingMode,
+      target_weight: nextTrackingMode === 'strength' ? prev.target_weight : '',
+    }))
+  }, [selectedExercise, newItemForm.exerciseSourceMode])
 
   const exercisePickerOptions = useMemo<ExercisePickerOption[]>(
     () =>
@@ -1155,8 +1172,18 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       return
     }
 
-    if (newItemForm.block === 'strength' && (!newItemForm.sets.trim() || !newItemForm.reps.trim())) {
-      toast.error('Informe séries e reps para item de força.')
+    if (newItemForm.block === 'strength' && !newItemForm.sets.trim()) {
+      toast.error('Informe séries para o item.')
+      return
+    }
+
+    if (newItemForm.trackingMode === 'strength' && !newItemForm.reps.trim()) {
+      toast.error('Informe as reps para item de força.')
+      return
+    }
+
+    if (newItemForm.trackingMode === 'mobility' && !newItemForm.duration_min.trim()) {
+      toast.error('Informe o tempo para item de mobilidade.')
       return
     }
 
@@ -1177,9 +1204,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
         custom_exercise_name: usingExisting ? null : exerciseName,
         muscle_group: usingExisting ? existingExercise?.muscle_group ?? null : null,
         sets: newItemForm.block === 'strength' ? Number(newItemForm.sets) : null,
-        reps: newItemForm.block === 'strength' ? newItemForm.reps.trim() : null,
-        target_weight: newItemForm.block === 'strength' && newItemForm.target_weight.trim() ? Number(newItemForm.target_weight) : null,
-        duration_min: newItemForm.block === 'cardio' && newItemForm.duration_min.trim() ? Number(newItemForm.duration_min) : null,
+        reps: newItemForm.block === 'strength' && newItemForm.reps.trim() ? newItemForm.reps.trim() : null,
+        target_weight: newItemForm.trackingMode === 'strength' && newItemForm.target_weight.trim() ? Number(newItemForm.target_weight) : null,
+        duration_min: newItemForm.duration_min.trim() ? Number(newItemForm.duration_min) : null,
         zone_min_bpm: newItemForm.block === 'cardio' && newItemForm.zone_min_bpm.trim() ? Number(newItemForm.zone_min_bpm) : null,
         zone_max_bpm: newItemForm.block === 'cardio' && newItemForm.zone_max_bpm.trim() ? Number(newItemForm.zone_max_bpm) : null,
         notes: newItemForm.notes.trim() || null,
@@ -1843,8 +1870,8 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                     {openNewItemDayId === day.id && (
                       <div className="mb-4 space-y-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
                         <div className="flex flex-wrap gap-2">
-                          <Button type="button" size="sm" variant={newItemForm.block === 'strength' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'strength' }))}>Força</Button>
-                          <Button type="button" size="sm" variant={newItemForm.block === 'cardio' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'cardio' }))}>Cardio</Button>
+                          <Button type="button" size="sm" variant={newItemForm.block === 'strength' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'strength', trackingMode: 'strength' }))}>Força / Mobilidade</Button>
+                          <Button type="button" size="sm" variant={newItemForm.block === 'cardio' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'cardio', trackingMode: 'cardio' }))}>Cardio</Button>
                         </div>
 
                         <div className="space-y-2">
@@ -1896,13 +1923,20 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                               <Input type="number" value={newItemForm.sets} onChange={(e) => setNewItemForm((prev) => ({ ...prev, sets: e.target.value }))} placeholder="4" />
                             </div>
                             <div className="space-y-2">
-                              <Label>Reps</Label>
-                              <Input value={newItemForm.reps} onChange={(e) => setNewItemForm((prev) => ({ ...prev, reps: e.target.value }))} placeholder="8-12" />
+                              <Label>{newItemForm.trackingMode === 'mobility' ? 'Reps (opcional)' : 'Reps'}</Label>
+                              <Input value={newItemForm.reps} onChange={(e) => setNewItemForm((prev) => ({ ...prev, reps: e.target.value }))} placeholder={newItemForm.trackingMode === 'mobility' ? '10' : '8-12'} />
                             </div>
-                            <div className="space-y-2">
-                              <Label>Carga alvo (kg)</Label>
-                              <Input type="number" value={newItemForm.target_weight} onChange={(e) => setNewItemForm((prev) => ({ ...prev, target_weight: e.target.value }))} placeholder="20" />
-                            </div>
+                            {newItemForm.trackingMode === 'mobility' ? (
+                              <div className="space-y-2">
+                                <Label>Tempo por série (min)</Label>
+                                <Input type="number" value={newItemForm.duration_min} onChange={(e) => setNewItemForm((prev) => ({ ...prev, duration_min: e.target.value }))} placeholder="1" />
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <Label>Carga alvo (kg)</Label>
+                                <Input type="number" value={newItemForm.target_weight} onChange={(e) => setNewItemForm((prev) => ({ ...prev, target_weight: e.target.value }))} placeholder="20" />
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1950,7 +1984,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <Badge variant={isCardio ? 'secondary' : 'outline'}>
-                                      {isCardio ? 'Cardio' : 'Força'}
+                                      {isCardio ? 'Cardio' : ((item.duration_min ?? 0) > 0 && !item.target_weight ? 'Mobilidade' : 'Força')}
                                     </Badge>
                                     <span className="font-medium text-white">{name}</span>
                                     {item.exercise_id ? (
@@ -1969,6 +2003,12 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                           <> • Zona: <strong>{item.zone_min_bpm ?? '-'} - {item.zone_max_bpm ?? '-'} bpm</strong></>
                                         ) : null}
                                       </>
+                                    ) : ((item.duration_min ?? 0) > 0 && !item.target_weight ? (
+                                      <>
+                                        Séries: <strong>{item.sets ?? 0}</strong>
+                                        {item.reps ? <> • Reps: <strong>{item.reps}</strong></> : null}
+                                        <> • Tempo: <strong>{item.duration_min ?? 0} min</strong></>
+                                      </>
                                     ) : (
                                       <>
                                         Séries: <strong>{item.sets ?? 0}</strong> • Reps: <strong>{item.reps ?? '-'}</strong>
@@ -1976,7 +2016,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                           <> • Carga alvo: <strong>{item.target_weight} kg</strong></>
                                         ) : null}
                                       </>
-                                    )}
+                                    ))}
                                   </div>
 
                                   {item.notes ? (

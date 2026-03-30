@@ -256,7 +256,7 @@ useEffect(() => {
       };
 
       const payload = {
-        user_id: user.id,
+        user_id: selectedStudentId || user.id,
         session_date: workout.date,
         weekday: weekdayMap[String(workout.weekDay)] ?? 1,
         total_volume: workout.totalVolume ?? 0,
@@ -282,7 +282,7 @@ useEffect(() => {
       const weekday = isoWeekday === 0 ? 7 : isoWeekday;
 
       const payload = {
-        user_id: user.id,
+        user_id: selectedStudentId || user.id,
         session_date: cardio.date,
         weekday,
         data: cardio,
@@ -304,7 +304,7 @@ useEffect(() => {
 
     try {
       const payload = {
-        user_id: user.id,
+        user_id: selectedStudentId || user.id,
         entry_date: data.date,
         data,
       };
@@ -444,8 +444,9 @@ useEffect(() => {
         return (
           <WorkoutForm
             onSave={handleSaveWorkout}
-            selectedUserId={null}
-            selectedUserLabel={null}
+            selectedUserId={selectedStudentId || null}
+            selectedUserLabel={selectedStudentName || null}
+            onOpenCardio={() => setCurrentPage('cardio')}
           />
         );
 
@@ -453,8 +454,8 @@ useEffect(() => {
         return (
           <CardioForm
             onSave={handleSaveCardio}
-            selectedUserId={null}
-            selectedUserLabel={null}
+            selectedUserId={selectedStudentId || null}
+            selectedUserLabel={selectedStudentName || null}
           />
         );
 

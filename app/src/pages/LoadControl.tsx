@@ -121,7 +121,7 @@ export function LoadControl({
   const effectiveWorkouts = isStudentMode ? dbWorkouts : workouts;
 
   const exerciseProgress = useMemo(() => {
-    return calculateExerciseProgress(effectiveWorkouts);
+    return calculateExerciseProgress(effectiveWorkouts).filter((item) => item.metricType === 'load');
   }, [effectiveWorkouts]);
 
   const filteredProgress = useMemo(() => {

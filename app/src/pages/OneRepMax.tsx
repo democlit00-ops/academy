@@ -236,6 +236,7 @@ export function OneRepMax({
 
     effectiveWorkouts.forEach((workout) => {
       workout.exercises.forEach((ex: any) => {
+        if (ex?.trackingMode === 'mobility') return
         const sets = Array.isArray(ex?.sets) ? ex.sets : []
         const exerciseName = getExerciseDisplayName(ex)
         const muscleGroup = getExerciseMuscleGroup(ex)
@@ -274,6 +275,7 @@ export function OneRepMax({
 
     effectiveWorkouts.forEach((workout) => {
       workout.exercises.forEach((ex: any) => {
+        if (ex?.trackingMode === 'mobility') return
         const sets = Array.isArray(ex?.sets) ? ex.sets : []
         const exerciseKey = buildExerciseKey(ex)
 
