@@ -1,4 +1,4 @@
-// academy\app\src\components\Navigation.tsx
+//academy\app\src\components\Navigation.tsx
 import {
   LayoutDashboard,
   Dumbbell,

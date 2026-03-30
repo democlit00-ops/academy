@@ -4,171 +4,196 @@ import type { ExerciseDefinition, MuscleGroup } from '@/types';
 // TABELA DE EXERCÍCIOS DE REFERÊNCIA
 // ============================================
 export const EXERCISE_DEFINITIONS: ExerciseDefinition[] = [
-  // PERNAS / QUADRÍCEPS
+  // PERNAS
   {
     id: 'agachamento-livre',
     name: 'Agachamento Livre',
     muscleGroup: 'Pernas',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'leg-press',
     name: 'Leg Press Máquina',
-    muscleGroup: 'Quadríceps',
+    muscleGroup: 'Pernas',
+    category: 'Força',
     loadIncrement: 10,
   },
   {
     id: 'extensora',
     name: 'Extensora',
-    muscleGroup: 'Quadríceps',
+    muscleGroup: 'Pernas',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'afundo-smith',
     name: 'Afundo Smith',
     muscleGroup: 'Pernas',
+    category: 'Força',
     loadIncrement: 2.5,
   },
-  
+
   // POSTERIOR
   {
     id: 'mesa-flexora',
     name: 'Mesa Flexora',
     muscleGroup: 'Posterior',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'stiff',
     name: 'Stiff',
     muscleGroup: 'Posterior',
+    category: 'Força',
     loadIncrement: 5,
   },
-  
-  // PANTURRILHA
+
+  // PANTURRILHA → PADRONIZADA COMO PERNAS
   {
     id: 'panturrilha-em-pe',
     name: 'Panturrilha em Pé',
-    muscleGroup: 'Panturrilha',
+    muscleGroup: 'Pernas',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'panturrilha-sentado',
     name: 'Panturrilha Sentado',
-    muscleGroup: 'Panturrilha',
+    muscleGroup: 'Pernas',
+    category: 'Força',
     loadIncrement: 5,
   },
-  
+
   // PEITO
   {
     id: 'supino-maquina',
     name: 'Supino Máquina',
     muscleGroup: 'Peito',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'chest-press',
     name: 'Chest Press',
     muscleGroup: 'Peito',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'crucifixo',
     name: 'Crucifixo',
     muscleGroup: 'Peito',
+    category: 'Força',
     loadIncrement: 2.5,
   },
-  
+
   // COSTAS
   {
     id: 'lat-pulldown',
     name: 'Lat Pulldown',
     muscleGroup: 'Costas',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'remada-maquina',
     name: 'Remada Máquina',
     muscleGroup: 'Costas',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'puxada-alta',
     name: 'Puxada Alta',
     muscleGroup: 'Costas',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'remada-curvada',
     name: 'Remada Curvada',
     muscleGroup: 'Costas',
+    category: 'Força',
     loadIncrement: 5,
   },
-  
-  // OMBRO
+
+  // OMBROS
   {
     id: 'desenvolvimento-ombro',
     name: 'Desenvolvimento Ombro Máquina',
-    muscleGroup: 'Ombro',
+    muscleGroup: 'Ombros',
+    category: 'Força',
     loadIncrement: 2.5,
   },
   {
     id: 'elevacao-lateral',
     name: 'Elevação Lateral',
-    muscleGroup: 'Ombro',
+    muscleGroup: 'Ombros',
+    category: 'Força',
     loadIncrement: 2,
   },
   {
     id: 'elevacao-frontal',
     name: 'Elevação Frontal',
-    muscleGroup: 'Ombro',
+    muscleGroup: 'Ombros',
+    category: 'Força',
     loadIncrement: 2,
   },
-  
+
   // BÍCEPS
   {
     id: 'rosca-biceps-maquina',
     name: 'Rosca Bíceps Máquina',
     muscleGroup: 'Bíceps',
+    category: 'Força',
     loadIncrement: 2,
   },
   {
     id: 'rosca-scott',
     name: 'Rosca Scott',
     muscleGroup: 'Bíceps',
+    category: 'Força',
     loadIncrement: 2.5,
   },
   {
     id: 'rosca-martelo',
     name: 'Rosca Martelo',
     muscleGroup: 'Bíceps',
+    category: 'Força',
     loadIncrement: 2,
   },
-  
+
   // TRÍCEPS
   {
     id: 'triceps-mergulho',
     name: 'Tríceps Mergulho Máquina',
     muscleGroup: 'Tríceps',
+    category: 'Força',
     loadIncrement: 5,
   },
   {
     id: 'triceps-polia',
     name: 'Tríceps Polia',
     muscleGroup: 'Tríceps',
+    category: 'Força',
     loadIncrement: 2.5,
   },
   {
     id: 'triceps-testa',
     name: 'Tríceps Testa',
     muscleGroup: 'Tríceps',
+    category: 'Força',
     loadIncrement: 2.5,
   },
-  
+
   // CORE
   {
     id: 'prancha',
     name: 'Prancha',
     muscleGroup: 'Core',
+    category: 'Core',
     loadIncrement: 0,
     isBodyweight: true,
   },
@@ -176,6 +201,7 @@ export const EXERCISE_DEFINITIONS: ExerciseDefinition[] = [
     id: 'dead-bug',
     name: 'Dead Bug',
     muscleGroup: 'Core',
+    category: 'Core',
     loadIncrement: 0,
     isBodyweight: true,
   },
@@ -183,12 +209,14 @@ export const EXERCISE_DEFINITIONS: ExerciseDefinition[] = [
     id: 'abdominal-maquina',
     name: 'Abdominal Máquina',
     muscleGroup: 'Core',
+    category: 'Core',
     loadIncrement: 0,
   },
   {
     id: 'russian-twist',
     name: 'Russian Twist',
     muscleGroup: 'Core',
+    category: 'Core',
     loadIncrement: 0,
     isBodyweight: true,
   },
@@ -199,30 +227,31 @@ export const EXERCISE_DEFINITIONS: ExerciseDefinition[] = [
 // ============================================
 
 export const getExerciseById = (id: string): ExerciseDefinition | undefined => {
-  return EXERCISE_DEFINITIONS.find(e => e.id === id);
+  return EXERCISE_DEFINITIONS.find((e) => e.id === id);
 };
 
 export const getExercisesByMuscleGroup = (group: MuscleGroup): ExerciseDefinition[] => {
-  return EXERCISE_DEFINITIONS.filter(e => e.muscleGroup === group);
+  return EXERCISE_DEFINITIONS.filter((e) => e.muscleGroup === group);
 };
 
 export const getAllMuscleGroups = (): MuscleGroup[] => {
   const groups = new Set<MuscleGroup>();
-  EXERCISE_DEFINITIONS.forEach(e => groups.add(e.muscleGroup));
+  EXERCISE_DEFINITIONS.forEach((e) => groups.add(e.muscleGroup));
   return Array.from(groups);
 };
 
 export const MUSCLE_GROUPS: MuscleGroup[] = [
   'Peito',
   'Costas',
-  'Ombro',
+  'Ombros',
   'Bíceps',
   'Tríceps',
-  'Quadríceps',
-  'Posterior',
-  'Panturrilha',
-  'Core',
   'Pernas',
+  'Glúteos',
+  'Posterior',
+  'Core',
+  'Cardio',
+  'Mobilidade',
 ];
 
 export const WEEK_DAYS = [

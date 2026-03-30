@@ -1,3 +1,4 @@
+//academy\app\src\pages\WorkoutForm.tsx
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Trash2, Save, Dumbbell, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -347,7 +348,6 @@ export function WorkoutForm({
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [dbExercises, setDbExercises] = useState<DbExercise[]>([])
-  const [lastAutoLoadedKey, setLastAutoLoadedKey] = useState<string | null>(null)
   const [activeProgramId, setActiveProgramId] = useState<string | null>(null)
   const [activeSplit, setActiveSplit] = useState<DbSplitPlan | null>(null)
   const [activeSplitDay, setActiveSplitDay] = useState<DbSplitDay | null>(null)
@@ -435,10 +435,9 @@ export function WorkoutForm({
     void loadExercises()
   }, [])
 
-  useEffect(() => {
+    useEffect(() => {
     setExercises([])
     setProgramExercises([])
-    setLastAutoLoadedKey(null)
     setActiveProgramId(null)
     setActiveSplit(null)
     setActiveSplitDay(null)
@@ -604,9 +603,8 @@ export function WorkoutForm({
           }
         })
 
-        const autoLoadKey = `${targetUserId}:${nextActiveProgramId}:${weekdayNum}`
-        setProgramExercises(mapped)
-        setLastAutoLoadedKey(autoLoadKey)
+                setProgramExercises(mapped)
+
       } catch (e: any) {
         toast.error(e?.message ?? 'Erro ao carregar treino do dia do programa ativo.')
       } finally {
@@ -721,11 +719,10 @@ export function WorkoutForm({
     })
   }
 
-  const handleDateChange = (value: string) => {
+    const handleDateChange = (value: string) => {
     setDate(value)
     setWeekDay(getWeekDayFromDateString(value))
     setProgramExercises([])
-    setLastAutoLoadedKey(null)
   }
 
   const applySplitSuggestions = () => {
@@ -836,7 +833,7 @@ export function WorkoutForm({
 
       setExercises([])
       setProgramExercises([])
-      setLastAutoLoadedKey(null)
+      
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao salvar treino.')
     } finally {

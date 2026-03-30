@@ -1,4 +1,4 @@
-// academy\app\src\pages\ShareWorkout.tsx
+//academy\app\src\pages\ShareWorkout.tsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Share2,
@@ -202,10 +202,7 @@ export function ShareWorkout({
 
   const selectedWorkoutTitle = useMemo(() => getWorkoutTitle(selectedWorkout), [selectedWorkout])
 
-  const selectedWorkoutVolume = useMemo(() => {
-    if (!selectedWorkout) return 0
-    return calculateWorkoutVolume(selectedWorkout)
-  }, [selectedWorkout])
+
 
   const totalSets = useMemo(() => {
     if (!selectedWorkout) return 0
