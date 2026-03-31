@@ -597,7 +597,7 @@ export function WorkoutForm({
 
         const planItems = (items ?? []) as unknown as DbPlanItem[]
         const strengthItems = planItems.filter((it) => it.block === 'strength')
-        const cardioItems = planItems.filter((it) => it.block === 'cardio')
+        
 
         const mapped: ProgramSuggestedExercise[] = strengthItems.map((it) => {
           const exId = it.exercise_id ?? ''

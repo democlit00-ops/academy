@@ -441,14 +441,13 @@ useEffect(() => {
         );
 
       case 'workout':
-        return (
-          <WorkoutForm
-            onSave={handleSaveWorkout}
-            selectedUserId={selectedStudentId || null}
-            selectedUserLabel={selectedStudentName || null}
-            onOpenCardio={() => setCurrentPage('cardio')}
-          />
-        );
+  return (
+    <WorkoutForm
+      onSave={handleSaveWorkout}
+      selectedUserId={selectedStudentId || null}
+      selectedUserLabel={selectedStudentName || null}
+    />
+  );
 
       case 'cardio':
         return (
