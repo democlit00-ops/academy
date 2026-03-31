@@ -23,7 +23,6 @@ interface WorkoutFormProps {
   onSave: (workout: WorkoutSession) => void
   selectedUserId?: string | null
   selectedUserLabel?: string | null
-  onOpenCardio?: () => void
 }
 
 type DbExercise = {
@@ -87,13 +86,7 @@ type ProgramSuggestedExercise = {
   trackingMode: ExerciseTrackingMode
 }
 
-type ProgramSuggestedCardio = {
-  planItemId: string
-  sortOrder: number
-  exerciseName: string
-  durationMin: number
-  notes?: string
-}
+
 
 type DbInjuryRow = {
   id: string
@@ -366,8 +359,7 @@ function getConflictingInjuries(params: {
 export function WorkoutForm({
   onSave,
   selectedUserId,
-  selectedUserLabel,
-  onOpenCardio,
+  selectedUserLabel
 }: WorkoutFormProps) {
   const { user } = useAuth()
   const isStudentMode = !!selectedUserId
@@ -378,7 +370,6 @@ export function WorkoutForm({
 
   const [exercises, setExercises] = useState<WorkoutExercise[]>([])
   const [programExercises, setProgramExercises] = useState<ProgramSuggestedExercise[]>([])
-  const [programCardioItems, setProgramCardioItems] = useState<ProgramSuggestedCardio[]>([])
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [dbExercises, setDbExercises] = useState<DbExercise[]>([])
@@ -561,12 +552,10 @@ export function WorkoutForm({
         }
 
         if (!nextActiveProgramId) {
-          setProgramExercises([])
-      setProgramCardioItems([])
-          setProgramCardioItems([])
-          setLoadingPlan(false)
-          return
-        }
+  setProgramExercises([])
+  setLoadingPlan(false)
+  return
+}
 
         const { data: dayRow, error: dayErr } = await supabase
           .from('plan_days')
@@ -577,12 +566,10 @@ export function WorkoutForm({
 
         if (dayErr) throw dayErr
         if (!dayRow?.id) {
-          setProgramExercises([])
-      setProgramCardioItems([])
-          setProgramCardioItems([])
-          setLoadingPlan(false)
-          return
-        }
+  setProgramExercises([])
+  setLoadingPlan(false)
+  return
+}
 
         const [{ data: items, error: itemsErr }, { data: recentRows, error: recentErr }] =
           await Promise.all([
@@ -647,16 +634,7 @@ export function WorkoutForm({
           }
         })
 
-        const mappedCardio: ProgramSuggestedCardio[] = cardioItems.map((it) => ({
-          planItemId: it.id,
-          sortOrder: it.sort_order,
-          exerciseName: it.exercises?.name ?? it.custom_exercise_name ?? 'Cardio',
-          durationMin: Number(it.duration_min) || 0,
-          notes: it.notes ?? undefined,
-        }))
-
         setProgramExercises(mapped)
-        setProgramCardioItems(mappedCardio)
 
       } catch (e: any) {
         toast.error(e?.message ?? 'Erro ao carregar treino do dia do programa ativo.')
@@ -891,7 +869,6 @@ export function WorkoutForm({
 
       setExercises([])
       setProgramExercises([])
-      setProgramCardioItems([])
       
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao salvar treino.')

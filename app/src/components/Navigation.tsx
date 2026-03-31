@@ -227,7 +227,7 @@ export function Navigation({
             <p className="mb-2 text-xs text-muted-foreground">Versão</p>
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white">AcademyK v2.4</p>
+                <p className="text-sm font-medium text-white">AcademyK v2.2</p>
                 <p className="truncate text-[11px] text-muted-foreground">{roleLabel}</p>
               </div>
               {isStudentMode && (

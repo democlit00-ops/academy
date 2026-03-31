@@ -319,7 +319,7 @@ export function Dashboard({
 
         const last = history[history.length - 1];
         const prev = history[history.length - 2];
-        const delta = progress.metricType === 'duration' ? ((last.maxDurationSec || 0) - (prev.maxDurationSec || 0)) / 60 : (last.maxWeight - prev.maxWeight);
+        const delta = ex.metricType === 'duration' ? ((last.maxDurationSec || 0) - (prev.maxDurationSec || 0)) / 60 : (last.maxWeight - prev.maxWeight);
 
         return {
           exerciseName: ex.exerciseName,

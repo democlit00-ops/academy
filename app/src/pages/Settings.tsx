@@ -345,7 +345,7 @@ export function Settings({
         </CardHeader>
         <CardContent>
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p><strong className="text-white">AcademyK</strong> v2.4</p>
+            <p><strong className="text-white">AcademyK</strong> v1.0</p>
             <p>Plataforma completa para controle de treino, cardio, análise fisiológica e acompanhamento de alunos.</p>
             <p>Desenvolvido por Kito Biten.</p>
           </div>
