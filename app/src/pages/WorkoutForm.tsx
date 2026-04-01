@@ -9,8 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import type { WorkoutSession, WorkoutExercise, WorkoutSet, WeekDay, MuscleGroup, ExerciseTrackingMode } from '@/types'
-import { calculateExerciseVolume, formatDurationSeconds } from '@/lib/calculations'
+import type { WorkoutSession, WorkoutExercise, WorkoutSet, WeekDay, MuscleGroup } from '@/types'
+import { calculateExerciseVolume } from '@/lib/calculations'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { supabase } from '@/lib/supabase'
@@ -83,10 +83,7 @@ type ProgramSuggestedExercise = {
   notes?: string
   sets: WorkoutSet[]
   sourceMode: ExerciseSourceMode
-  trackingMode: ExerciseTrackingMode
 }
-
-
 
 type DbInjuryRow = {
   id: string
@@ -266,17 +263,7 @@ function resolvePrefilledSets(
   }))
 }
 
-function inferTrackingMode(category?: string | null, muscleGroup?: string | null, durationMin?: number | null): ExerciseTrackingMode {
-  const cat = String(category ?? '').toLowerCase()
-  const mg = String(muscleGroup ?? '').toLowerCase()
-  if (durationMin && durationMin > 0) return 'mobility'
-  if (cat.includes('mobilidade') || cat.includes('core') || mg.includes('mobilidade') || mg.includes('core')) {
-    return 'mobility'
-  }
-  return 'strength'
-}
-
-function buildExerciseMeta(sets: WorkoutSet[], trackingMode: ExerciseTrackingMode = 'strength') {
+function buildExerciseMeta(sets: WorkoutSet[]) {
   const setsCount = sets.length
   const repsValues = sets
     .map((set) => Number(set.reps || 0))
@@ -291,18 +278,6 @@ function buildExerciseMeta(sets: WorkoutSet[], trackingMode: ExerciseTrackingMod
         ? `${minReps} reps`
         : `${minReps}-${maxReps} reps`
       : 'Sem reps definidas'
-
-  if (trackingMode === 'mobility') {
-    const durationValues = sets.map((set) => Number(set.durationSec || 0)).filter((value) => value > 0)
-    const minDuration = durationValues.length ? Math.min(...durationValues) : 0
-    const maxDuration = durationValues.length ? Math.max(...durationValues) : 0
-    const durationLabel = minDuration && maxDuration
-      ? minDuration === maxDuration
-        ? formatDurationSeconds(minDuration)
-        : `${formatDurationSeconds(minDuration)}-${formatDurationSeconds(maxDuration)}`
-      : 'Sem tempo definido'
-    return `${setsCount} ${setsCount === 1 ? 'série' : 'séries'} • ${durationLabel}`
-  }
 
   return `${setsCount} ${setsCount === 1 ? 'série' : 'séries'} • ${repsLabel}`
 }
@@ -359,7 +334,7 @@ function getConflictingInjuries(params: {
 export function WorkoutForm({
   onSave,
   selectedUserId,
-  selectedUserLabel
+  selectedUserLabel,
 }: WorkoutFormProps) {
   const { user } = useAuth()
   const isStudentMode = !!selectedUserId
@@ -440,6 +415,8 @@ export function WorkoutForm({
   }, [todaySplitGroups, injuryAlerts])
 
   const hasSplitConflicts = splitConflictGroups.length > 0
+  const shouldShowSplitPanel = !activeProgramId && !!activeSplit
+  const shouldShowProgramPanel = !!activeProgramId
 
   useEffect(() => {
     const loadExercises = async () => {
@@ -552,10 +529,10 @@ export function WorkoutForm({
         }
 
         if (!nextActiveProgramId) {
-  setProgramExercises([])
-  setLoadingPlan(false)
-  return
-}
+          setProgramExercises([])
+          setLoadingPlan(false)
+          return
+        }
 
         const { data: dayRow, error: dayErr } = await supabase
           .from('plan_days')
@@ -566,10 +543,10 @@ export function WorkoutForm({
 
         if (dayErr) throw dayErr
         if (!dayRow?.id) {
-  setProgramExercises([])
-  setLoadingPlan(false)
-  return
-}
+          setProgramExercises([])
+          setLoadingPlan(false)
+          return
+        }
 
         const [{ data: items, error: itemsErr }, { data: recentRows, error: recentErr }] =
           await Promise.all([
@@ -597,7 +574,6 @@ export function WorkoutForm({
 
         const planItems = (items ?? []) as unknown as DbPlanItem[]
         const strengthItems = planItems.filter((it) => it.block === 'strength')
-        
 
         const mapped: ProgramSuggestedExercise[] = strengthItems.map((it) => {
           const exId = it.exercise_id ?? ''
@@ -615,11 +591,7 @@ export function WorkoutForm({
             (lookupById ? lastExerciseSetMap.get(lookupById) : undefined) ??
             (lookupByName ? lastExerciseSetMap.get(lookupByName) : undefined)
 
-          const trackingMode = inferTrackingMode(dbExercisesById.get(exId)?.category, it.muscle_group, it.duration_min)
-          const baseSets = resolvePrefilledSets(setsCount, repsN, fallbackWeight, previousSets)
-          const sets = trackingMode === 'mobility'
-            ? baseSets.map((set) => ({ ...set, weight: 0, durationSec: Math.max(0, Math.round((Number(it.duration_min) || 0) * 60)) }))
-            : baseSets
+          const sets = resolvePrefilledSets(setsCount, repsN, fallbackWeight, previousSets)
 
           return {
             planItemId: it.id,
@@ -630,11 +602,10 @@ export function WorkoutForm({
             notes: it.notes ?? undefined,
             sets,
             sourceMode: exId ? 'bank' : 'custom',
-            trackingMode,
           }
         })
 
-        setProgramExercises(mapped)
+                setProgramExercises(mapped)
 
       } catch (e: any) {
         toast.error(e?.message ?? 'Erro ao carregar treino do dia do programa ativo.')
@@ -654,7 +625,6 @@ export function WorkoutForm({
       muscleGroup: 'Peito' as MuscleGroup,
       sourceMode: 'bank',
       sets: [{ reps: 10, weight: 0 }],
-      trackingMode: 'strength',
       rpe: 7,
     }
     setExercises((prev) => [...prev, newExercise])
@@ -675,7 +645,7 @@ export function WorkoutForm({
           const lastSet = e.sets[e.sets.length - 1]
           return {
             ...e,
-            sets: [...e.sets, e.trackingMode === 'mobility' ? { reps: lastSet?.reps || 0, weight: 0, durationSec: lastSet?.durationSec || 30 } : { reps: lastSet?.reps || 10, weight: lastSet?.weight || 0 }],
+            sets: [...e.sets, { reps: lastSet?.reps || 10, weight: lastSet?.weight || 0 }],
           }
         }
         return e
@@ -719,7 +689,6 @@ export function WorkoutForm({
         exerciseId: ex.id,
         exerciseName: ex.name,
         muscleGroup: normalizeMuscleGroup(ex.muscle_group),
-        trackingMode: inferTrackingMode(ex.category, ex.muscle_group),
       })
     }
   }
@@ -772,7 +741,6 @@ export function WorkoutForm({
         exerciseName: matchedExercise?.name ?? '',
         muscleGroup: normalizeMuscleGroup(group),
         sets: [{ reps: 10, weight: 0 }],
-        trackingMode: 'strength',
         rpe: 7,
         notes: `Sugestão do split: ${group}`,
         sourceMode: matchedExercise?.id ? 'bank' : 'custom',
@@ -799,7 +767,6 @@ export function WorkoutForm({
       rpe: 7,
       notes: item.notes,
       sourceMode: item.sourceMode,
-      trackingMode: item.trackingMode,
     }
 
     setExercises((prev) => [...prev, newExercise])
@@ -825,7 +792,6 @@ export function WorkoutForm({
       rpe: 7,
       notes: item.notes,
       sourceMode: item.sourceMode,
-      trackingMode: item.trackingMode,
     }))
 
     setExercises((prev) => [...prev, ...mapped])
@@ -947,7 +913,7 @@ export function WorkoutForm({
         </Card>
       )}
 
-      {activeSplit && (
+      {shouldShowSplitPanel && (
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="pt-6">
             <div className="space-y-3">
@@ -1019,80 +985,97 @@ export function WorkoutForm({
                       )}
                     </div>
 
-                    {hasProgramSuggestions && (
-                      <div className="rounded-xl border border-primary/20 bg-background/30 p-4">
-                        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                          <div>
-                            <div className="text-sm font-medium text-white">Treino do dia do programa</div>
-                            <p className="text-xs text-muted-foreground">
-                              Escolha 1 por 1 ou puxe todos para a área de registro.
-                            </p>
-                          </div>
-
-                          <Button onClick={addAllProgramExercisesToRegister} variant="outline" className="gap-2">
-                            <Plus className="h-4 w-4" />
-                            Adicionar todos
-                          </Button>
-                        </div>
-
-                        <div className="space-y-3">
-                          {programExercises.map((item) => {
-                            const dedupeKey = normalizeExerciseLookupKey(item.sourceExerciseId || item.exerciseName)
-                            const alreadyAdded = programAddedKeys.has(dedupeKey)
-                            const conflicts = getConflictingInjuries({
-                              muscleGroup: item.muscleGroup,
-                              exerciseName: item.exerciseName,
-                              injuries: injuryAlerts,
-                            })
-
-                            return (
-                              <div
-                                key={item.planItemId}
-                                className="rounded-lg border border-border/60 bg-background/40 px-4 py-3"
-                              >
-                                <div className="flex flex-wrap items-start justify-between gap-3">
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <div className="text-sm font-medium text-white">{item.exerciseName}</div>
-
-                                      {conflicts.length > 0 && (
-                                        <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
-                                          Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
-                                        </Badge>
-                                      )}
-                                    </div>
-
-                                    <div className="text-xs text-muted-foreground">{buildExerciseMeta(item.sets)}</div>
-
-                                    {conflicts.length > 0 && (
-                                      <div className="mt-1 text-xs text-amber-200">
-                                        Revise esse exercício antes de adicionar ao registro.
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <ExerciseHelpMenu exerciseName={item.exerciseName} />
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      variant={alreadyAdded ? 'secondary' : 'outline'}
-                                      disabled={alreadyAdded}
-                                      onClick={() => addProgramExerciseToRegister(item)}
-                                    >
-                                      {alreadyAdded ? 'Já adicionado' : 'Adicionar treino'}
-                                    </Button>
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </>
               )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+
+      {shouldShowProgramPanel && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardContent className="pt-6">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="border-primary/30 bg-primary/20 text-primary">Programa ativo</Badge>
+                    <span className="text-base font-semibold text-white">Treino do dia do programa</span>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Escolha 1 por 1 ou puxe todos para a área de registro.
+                  </p>
+                </div>
+
+                {hasProgramSuggestions && (
+                  <Button onClick={addAllProgramExercisesToRegister} variant="outline" className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Adicionar todos
+                  </Button>
+                )}
+              </div>
+
+              {hasProgramSuggestions ? (
+                <div className="space-y-3">
+                  {programExercises.map((item) => {
+                    const dedupeKey = normalizeExerciseLookupKey(item.sourceExerciseId || item.exerciseName)
+                    const alreadyAdded = programAddedKeys.has(dedupeKey)
+                    const conflicts = getConflictingInjuries({
+                      muscleGroup: item.muscleGroup,
+                      exerciseName: item.exerciseName,
+                      injuries: injuryAlerts,
+                    })
+
+                    return (
+                      <div
+                        key={item.planItemId}
+                        className="rounded-lg border border-border/60 bg-background/40 px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-sm font-medium text-white">{item.exerciseName}</div>
+
+                              {conflicts.length > 0 && (
+                                <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
+                                  Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
+                                </Badge>
+                              )}
+                            </div>
+
+                            <div className="text-xs text-muted-foreground">{buildExerciseMeta(item.sets)}</div>
+
+                            {conflicts.length > 0 && (
+                              <div className="mt-1 text-xs text-amber-200">
+                                Revise esse exercício antes de adicionar ao registro.
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <ExerciseHelpMenu exerciseName={item.exerciseName} />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={alreadyAdded ? 'secondary' : 'outline'}
+                              disabled={alreadyAdded}
+                              onClick={() => addProgramExerciseToRegister(item)}
+                            >
+                              {alreadyAdded ? 'Já adicionado' : 'Adicionar treino'}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : !loadingPlan ? (
+                <div className="rounded-xl border border-border/60 bg-background/30 p-4 text-sm text-muted-foreground">
+                  Nenhum exercício configurado para <strong className="text-white">{weekDay}</strong> no programa ativo.
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>
@@ -1328,56 +1311,35 @@ export function WorkoutForm({
                   <Label>Séries</Label>
                   <div className="space-y-2">
                     {exercise.sets.map((set, setIndex) => (
-                      <div key={setIndex} className="flex flex-wrap items-center gap-2">
+                      <div key={setIndex} className="flex items-center gap-2">
                         <span className="w-12 text-sm text-muted-foreground">Série {setIndex + 1}</span>
-                        {exercise.trackingMode === 'mobility' ? (
-                          <>
-                            <Input
-                              type="number"
-                              placeholder="Reps"
-                              value={set.reps || ''}
-                              onChange={(e) =>
-                                updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
-                              }
-                              className="w-20 bg-background border-border"
-                            />
-                            <Input
-                              type="number"
-                              placeholder="Tempo (s)"
-                              value={set.durationSec || ''}
-                              onChange={(e) =>
-                                updateSet(exercise.id, setIndex, { durationSec: parseInt(e.target.value) || 0 })
-                              }
-                              className="w-28 bg-background border-border"
-                            />
-                            <span className="text-muted-foreground">seg</span>
-                          </>
-                        ) : (
-                          <>
-                            <Input
-                              type="number"
-                              placeholder="Reps"
-                              value={set.reps || ''}
-                              onChange={(e) =>
-                                updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
-                              }
-                              className="w-20 bg-background border-border"
-                            />
-                            <span className="text-muted-foreground">x</span>
-                            <Input
-                              type="number"
-                              placeholder="Kg"
-                              value={set.weight || ''}
-                              onChange={(e) =>
-                                updateSet(exercise.id, setIndex, { weight: parseFloat(e.target.value) || 0 })
-                              }
-                              className="w-24 bg-background border-border"
-                            />
-                            <span className="text-muted-foreground">kg</span>
-                          </>
-                        )}
+                        <Input
+                          type="number"
+                          placeholder="Reps"
+                          value={set.reps || ''}
+                          onChange={(e) =>
+                            updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
+                          }
+                          className="w-20 bg-background border-border"
+                        />
+                        <span className="text-muted-foreground">x</span>
+                        <Input
+                          type="number"
+                          placeholder="Kg"
+                          value={set.weight || ''}
+                          onChange={(e) =>
+                            updateSet(exercise.id, setIndex, { weight: parseFloat(e.target.value) || 0 })
+                          }
+                          className="w-24 bg-background border-border"
+                        />
+                        <span className="text-muted-foreground">kg</span>
                         {exercise.sets.length > 1 && (
-                          <Button variant="ghost" size="sm" onClick={() => removeSet(exercise.id, setIndex)} className="text-destructive">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeSet(exercise.id, setIndex)}
+                            className="text-destructive"
+                          >
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         )}

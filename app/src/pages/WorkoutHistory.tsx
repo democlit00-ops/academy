@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { LineChart } from '@/components/charts'
 import type { WorkoutSession, WeekDay, MuscleGroup, WorkoutExercise } from '@/types'
 import { MUSCLE_GROUPS } from '@/data/exercises'
-import { calculateWorkoutVolume, calculateExerciseProgress, formatWeight, formatDurationSeconds } from '@/lib/calculations'
+import { calculateWorkoutVolume, calculateExerciseProgress, formatWeight } from '@/lib/calculations'
 import { format, startOfDay, endOfDay } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
@@ -64,10 +64,8 @@ function mapDbToWorkoutSession(row: DbWorkoutSession): WorkoutSession {
       ? ex.sets.map((s: any) => ({
           reps: coerceNumber(s.reps, 0),
           weight: coerceNumber(s.weight, 0),
-          durationSec: coerceNumber(s.durationSec, 0),
         }))
-      : [{ reps: 0, weight: 0, durationSec: 0 }],
-    trackingMode: ex.trackingMode ?? (Array.isArray(ex.sets) && ex.sets.some((s: any) => coerceNumber(s.durationSec, 0) > 0) ? 'mobility' : 'strength'),
+      : [{ reps: 0, weight: 0 }],
     rpe: coerceNumber(ex.rpe, 7),
     avgHeartRate: ex.avgHeartRate ?? undefined,
     maxHeartRate: ex.maxHeartRate ?? undefined,
@@ -192,22 +190,19 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
       })
   }, [workouts, selectedMuscleGroup, selectedExercise, startDate, endDate])
 
-  const selectedExerciseProgress = useMemo(() => {
-    if (selectedExercise === 'all') return null
-    const progress = calculateExerciseProgress(workouts, selectedExercise)
-    return progress[0] ?? null
-  }, [workouts, selectedExercise])
-
   const progressData = useMemo(() => {
-    if (!selectedExerciseProgress) return []
+    if (selectedExercise === 'all') return []
 
-    return selectedExerciseProgress.history.map((h) => ({
+    const progress = calculateExerciseProgress(workouts, selectedExercise)
+    if (progress.length === 0) return []
+
+    return progress[0].history.map((h) => ({
       date: h.date,
       label: formatLocalDate(h.date, (d) => format(d, 'dd/MM')),
-      maxMetric: selectedExerciseProgress.metricType === 'duration' ? (h.maxDurationSec || 0) / 60 : h.maxWeight,
-      volume: selectedExerciseProgress.metricType === 'duration' ? (h.totalDurationSec || 0) / 60 : h.totalVolume,
+      maxWeight: h.maxWeight,
+      volume: h.totalVolume,
     }))
-  }, [selectedExerciseProgress])
+  }, [workouts, selectedExercise])
 
   const stats = useMemo(() => {
     const totalWorkouts = filteredWorkouts.length
@@ -385,7 +380,7 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
             <LineChart
               data={progressData}
               lines={[
-                { key: 'maxMetric', name: selectedExerciseProgress?.metricType === 'duration' ? 'Tempo Máximo (min)' : 'Carga Máxima', color: '#3b82f6' },
+                { key: 'maxWeight', name: 'Carga Máxima', color: '#3b82f6' },
                 { key: 'volume', name: 'Volume', color: '#22c55e' },
               ]}
               xAxisKey="label"
@@ -526,9 +521,9 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
                                           <TableRow key={setIndex} className="border-border">
                                             <TableCell className="text-white">{setIndex + 1}</TableCell>
                                             <TableCell className="text-white">{set.reps}</TableCell>
-                                            <TableCell className="text-white">{exercise.trackingMode === 'mobility' ? formatDurationSeconds(set.durationSec || 0) : formatWeight(set.weight)}</TableCell>
+                                            <TableCell className="text-white">{formatWeight(set.weight)}</TableCell>
                                             <TableCell className="text-white">
-                                              {exercise.trackingMode === 'mobility' ? (set.reps || 0) : formatWeight((set.reps || 0) * (set.weight || 0))}
+                                              {formatWeight((set.reps || 0) * (set.weight || 0))}
                                             </TableCell>
                                           </TableRow>
                                         ))}

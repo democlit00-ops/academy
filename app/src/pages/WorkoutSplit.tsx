@@ -7,6 +7,7 @@ import {
   Dumbbell,
   Pencil,
   Play,
+  Square,
   Plus,
   Save,
   Sparkles,
@@ -283,6 +284,7 @@ function SplitCard({
   isActive: boolean
   canSetActive: boolean
   onSetActive: () => void
+  onDeactivate?: () => void
   onEdit?: () => void
   onDelete?: () => void
   canManage?: boolean
@@ -317,10 +319,17 @@ function SplitCard({
             </Button>
 
             {canSetActive && (
-              <Button size="sm" onClick={onSetActive} disabled={isActive || activating} className="gap-2">
-                <Play className="h-4 w-4" />
-                {isActive ? 'Ativo' : activating ? 'Salvando...' : 'Definir ativo'}
-              </Button>
+              isActive && onDeactivate ? (
+                <Button size="sm" variant="secondary" onClick={onDeactivate} disabled={activating} className="gap-2">
+                  <Square className="h-4 w-4" />
+                  {activating ? 'Salvando...' : 'Desativar'}
+                </Button>
+              ) : (
+                <Button size="sm" onClick={onSetActive} disabled={activating} className="gap-2">
+                  <Play className="h-4 w-4" />
+                  {activating ? 'Salvando...' : 'Definir ativo'}
+                </Button>
+              )
             )}
 
             {canManage && onAssign && (
@@ -788,6 +797,25 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
     }
   }
 
+  const clearActiveSplitForTarget = async () => {
+    if (!targetUserId) return
+
+    setChangingActiveSplitId(activeSplitId ?? '__clearing__')
+    try {
+      const { error } = await supabase
+        .from('user_active_plan')
+        .upsert({ user_id: targetUserId, active_split_id: null }, { onConflict: 'user_id' })
+      if (error) throw error
+
+      setActiveSplitId(null)
+      toast.success(isStudentMode ? 'Split do aluno desativado!' : 'Split ativo removido!')
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao desativar split ativo.')
+    } finally {
+      setChangingActiveSplitId(null)
+    }
+  }
+
   const setActiveSplitForTarget = async (splitId: string) => {
     if (!targetUserId) return
 
@@ -1023,6 +1051,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
                     isActive={activeSplitId === split.id}
                     canSetActive={canChangeActiveSplit}
                     onSetActive={() => setActiveSplitForTarget(split.id)}
+                    onDeactivate={activeSplitId === split.id ? () => clearActiveSplitForTarget() : undefined}
                     activating={changingActiveSplitId === split.id}
                   />
                 ))}
@@ -1058,6 +1087,7 @@ export function WorkoutSplitPlanner({ selectedUserId, selectedUserLabel }: Worko
                     isActive={activeSplitId === split.id}
                     canSetActive={canChangeActiveSplit}
                     onSetActive={() => setActiveSplitForTarget(split.id)}
+                    onDeactivate={activeSplitId === split.id ? () => clearActiveSplitForTarget() : undefined}
                     activating={changingActiveSplitId === split.id}
                   />
                 ))}

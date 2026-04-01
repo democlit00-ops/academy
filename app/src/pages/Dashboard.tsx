@@ -288,7 +288,7 @@ export function Dashboard({
       const point: Record<string, any> = { date, label: formatLocalDate(date, (d) => format(d, 'dd/MM')) };
       topExercises.forEach((ex) => {
         const dayData = ex.history.find((h) => h.date === date);
-        point[ex.exerciseName] = ex.metricType === 'duration' ? ((dayData?.maxDurationSec || 0) / 60) : (dayData?.maxWeight || 0);
+        point[ex.exerciseName] = dayData?.maxWeight || 0;
       });
       return point;
     });
@@ -319,7 +319,7 @@ export function Dashboard({
 
         const last = history[history.length - 1];
         const prev = history[history.length - 2];
-        const delta = ex.metricType === 'duration' ? ((last.maxDurationSec || 0) - (prev.maxDurationSec || 0)) / 60 : (last.maxWeight - prev.maxWeight);
+        const delta = last.maxWeight - prev.maxWeight;
 
         return {
           exerciseName: ex.exerciseName,

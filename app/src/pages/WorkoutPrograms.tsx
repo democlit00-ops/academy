@@ -153,7 +153,6 @@ type NewItemForm = {
   zone_min_bpm: string
   zone_max_bpm: string
   notes: string
-  trackingMode: 'strength' | 'mobility' | 'cardio'
 }
 
 
@@ -328,7 +327,6 @@ const emptyNewItemForm = (): NewItemForm => ({
   zone_min_bpm: '',
   zone_max_bpm: '',
   notes: '',
-  trackingMode: 'strength',
 })
 
 export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutProgramsProps) {
@@ -347,6 +345,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const [activeProgramId, setActiveProgramId] = useState<string | null>(null)
   const [activeProgram, setActiveProgram] = useState<ProgramUI | null>(null)
   const [changingProgram, setChangingProgram] = useState<string | null>(null)
+  const [deletingProgramId, setDeletingProgramId] = useState<string | null>(null)
   const [details, setDetails] = useState<Record<string, { days: (DbPlanDay & { items: DbPlanItem[] })[] }>>({})
   const [activeProgramDays, setActiveProgramDays] = useState<DbPlanDay[]>([])
   const [activeProgramItems, setActiveProgramItems] = useState<Record<string, DbPlanItem[]>>({})
@@ -386,21 +385,6 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     () => exerciseOptions.find((exercise) => exercise.id === newItemForm.selectedExerciseId) ?? null,
     [exerciseOptions, newItemForm.selectedExerciseId]
   )
-
-  useEffect(() => {
-    if (!selectedExercise || newItemForm.exerciseSourceMode !== 'existing') return
-
-    const nextTrackingMode = selectedExercise.type === 'cardio'
-      ? 'cardio'
-      : (selectedExercise.category === 'Mobilidade' || selectedExercise.category === 'Core' ? 'mobility' : 'strength')
-
-    setNewItemForm((prev) => ({
-      ...prev,
-      block: nextTrackingMode === 'cardio' ? 'cardio' : 'strength',
-      trackingMode: nextTrackingMode,
-      target_weight: nextTrackingMode === 'strength' ? prev.target_weight : '',
-    }))
-  }, [selectedExercise, newItemForm.exerciseSourceMode])
 
   const exercisePickerOptions = useMemo<ExercisePickerOption[]>(
     () =>
@@ -1172,18 +1156,8 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       return
     }
 
-    if (newItemForm.block === 'strength' && !newItemForm.sets.trim()) {
-      toast.error('Informe séries para o item.')
-      return
-    }
-
-    if (newItemForm.trackingMode === 'strength' && !newItemForm.reps.trim()) {
-      toast.error('Informe as reps para item de força.')
-      return
-    }
-
-    if (newItemForm.trackingMode === 'mobility' && !newItemForm.duration_min.trim()) {
-      toast.error('Informe o tempo para item de mobilidade.')
+    if (newItemForm.block === 'strength' && (!newItemForm.sets.trim() || !newItemForm.reps.trim())) {
+      toast.error('Informe séries e reps para item de força.')
       return
     }
 
@@ -1204,9 +1178,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
         custom_exercise_name: usingExisting ? null : exerciseName,
         muscle_group: usingExisting ? existingExercise?.muscle_group ?? null : null,
         sets: newItemForm.block === 'strength' ? Number(newItemForm.sets) : null,
-        reps: newItemForm.block === 'strength' && newItemForm.reps.trim() ? newItemForm.reps.trim() : null,
-        target_weight: newItemForm.trackingMode === 'strength' && newItemForm.target_weight.trim() ? Number(newItemForm.target_weight) : null,
-        duration_min: newItemForm.duration_min.trim() ? Number(newItemForm.duration_min) : null,
+        reps: newItemForm.block === 'strength' ? newItemForm.reps.trim() : null,
+        target_weight: newItemForm.block === 'strength' && newItemForm.target_weight.trim() ? Number(newItemForm.target_weight) : null,
+        duration_min: newItemForm.block === 'cardio' && newItemForm.duration_min.trim() ? Number(newItemForm.duration_min) : null,
         zone_min_bpm: newItemForm.block === 'cardio' && newItemForm.zone_min_bpm.trim() ? Number(newItemForm.zone_min_bpm) : null,
         zone_max_bpm: newItemForm.block === 'cardio' && newItemForm.zone_max_bpm.trim() ? Number(newItemForm.zone_max_bpm) : null,
         notes: newItemForm.notes.trim() || null,
@@ -1334,22 +1308,148 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     )
   }
 
+
+  const getItemTypeLabel = (item: DbPlanItem) => {
+    if (item.block === 'cardio') return 'Cardio'
+    const muscle = String(item.muscle_group ?? '').toLowerCase()
+    if (muscle.includes('mobilidade') || muscle.includes('core')) return 'Mobilidade'
+    return 'Força'
+  }
+
+  const getItemTypeClasses = (item: DbPlanItem) => {
+    if (item.block === 'cardio') return 'border-cyan-400/30 bg-cyan-500/10 text-cyan-300'
+    const muscle = String(item.muscle_group ?? '').toLowerCase()
+    if (muscle.includes('mobilidade') || muscle.includes('core')) return 'border-violet-400/30 bg-violet-500/10 text-violet-300'
+    return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300'
+  }
+
+  const buildItemMeta = (item: DbPlanItem) => {
+    if (item.block === 'cardio') {
+      const parts = [] as string[]
+      if ((item.duration_min ?? 0) > 0) parts.push(`${item.duration_min} min`)
+      if (item.zone_min_bpm || item.zone_max_bpm) parts.push(`Zona ${item.zone_min_bpm ?? '—'} - ${item.zone_max_bpm ?? '—'} bpm`)
+      return parts.join(' • ') || 'Cardio do dia'
+    }
+
+    const parts = [] as string[]
+    if ((item.sets ?? 0) > 0) parts.push(`${item.sets} série${item.sets === 1 ? '' : 's'}`)
+    if (item.reps) parts.push(`${item.reps} reps`)
+    if ((item.duration_min ?? 0) > 0) parts.push(`${item.duration_min} min`)
+    if ((item.target_weight ?? 0) > 0) parts.push(`${item.target_weight} kg alvo`)
+    return parts.join(' • ') || 'Sem meta definida'
+  }
+
+  const handleDeleteProgram = async (program: ProgramUI) => {
+    if (!user) return
+    if (program.source !== 'owned' || isStudentMode) return
+
+    const confirmed = window.confirm(`Excluir o programa "${program.name}"? Essa ação remove dias, itens e vínculos.`)
+    if (!confirmed) return
+
+    try {
+      setDeletingProgramId(program.id)
+
+      const { data: dayRows, error: daysLoadError } = await supabase
+        .from('plan_days')
+        .select('id')
+        .eq('plan_id', program.id)
+
+      if (daysLoadError) throw daysLoadError
+
+      const dayIds = ((dayRows ?? []) as Array<{ id: string }>).map((row) => row.id)
+
+      if (dayIds.length > 0) {
+        const { error: deleteItemsError } = await supabase
+          .from('plan_items')
+          .delete()
+          .in('plan_day_id', dayIds)
+        if (deleteItemsError) throw deleteItemsError
+      }
+
+      const { error: deleteDaysError } = await supabase
+        .from('plan_days')
+        .delete()
+        .eq('plan_id', program.id)
+      if (deleteDaysError) throw deleteDaysError
+
+      const { error: deleteAssignmentsError } = await supabase
+        .from('plan_students')
+        .delete()
+        .eq('plan_id', program.id)
+      if (deleteAssignmentsError) throw deleteAssignmentsError
+
+      const { error: clearActiveError } = await supabase
+        .from('user_active_plan')
+        .update({ active_program_id: null, updated_at: new Date().toISOString() })
+        .eq('active_program_id', program.id)
+      if (clearActiveError) throw clearActiveError
+
+      const { error: deletePlanError } = await supabase
+        .from('plans')
+        .delete()
+        .eq('id', program.id)
+        .eq('owner_id', user.id)
+      if (deletePlanError) throw deletePlanError
+
+      setOwnedPrograms((prev) => prev.filter((item) => item.id !== program.id))
+      setPublicPrograms((prev) => prev.filter((item) => item.id !== program.id))
+      setAssignedPrograms((prev) => prev.filter((item) => item.id !== program.id))
+      setDetails((prev) => {
+        const next = { ...prev }
+        delete next[program.id]
+        return next
+      })
+      setPlanStudentIds((prev) => {
+        const next = { ...prev }
+        delete next[program.id]
+        return next
+      })
+      setDraftPlanStudentIds((prev) => {
+        const next = { ...prev }
+        delete next[program.id]
+        return next
+      })
+      if (expandedProgram === program.id) setExpandedProgram(null)
+      if (editingContentProgram?.id === program.id) {
+        setIsContentDialogOpen(false)
+        setEditingContentProgram(null)
+      }
+      if (activeProgramId === program.id) {
+        setActiveProgramId(null)
+        setActiveProgram(null)
+        setActiveProgramDays([])
+        setActiveProgramItems({})
+        setCompletedTodayKeys([])
+      }
+
+      toast.success(`Programa "${program.name}" excluído com sucesso.`)
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao excluir programa.')
+    } finally {
+      setDeletingProgramId(null)
+    }
+  }
+
   const renderProgramCard = (program: ProgramUI) => {
     const isActive = activeProgramId === program.id
+    const isOwned = program.source === 'owned'
+    const canDeleteProgram = isOwned && !isStudentMode
 
     return (
-      <Card key={program.id} className="overflow-hidden border-border bg-card">
+      <Card key={program.id} className={`overflow-hidden border bg-card/95 shadow-sm transition-all ${isActive ? 'border-primary/50 shadow-[0_0_0_1px_rgba(59,130,246,0.2)]' : 'border-border hover:border-primary/20'}`}>
         <CardContent className="p-0">
           <div
-            className="cursor-pointer p-4 transition-colors hover:bg-muted/50"
+            className={`cursor-pointer p-4 transition-colors ${isActive ? 'bg-primary/5' : 'hover:bg-muted/40'}`}
             onClick={() => void toggleProgram(program.id)}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-4">
-                <div className="text-4xl">{program.image}</div>
-                <div>
-                  <h3 className="font-medium text-white">{program.name}</h3>
-                  <p className="text-sm text-muted-foreground">{program.description}</p>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
+                <div className={`mt-0.5 flex h-14 w-14 items-center justify-center rounded-2xl border text-3xl ${isActive ? 'border-primary/40 bg-primary/10' : 'border-border bg-background/60'}`}>{program.image}</div>
+                <div className="space-y-2">
+                  <div>
+                    <h3 className="text-lg font-semibold leading-tight text-white">{program.name}</h3>
+                    <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{program.description}</p>
+                  </div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Badge variant="secondary" className="text-xs"><Clock className="mr-1 h-3 w-3" />{program.duration}</Badge>
                     <Badge variant="secondary" className="text-xs"><Calendar className="mr-1 h-3 w-3" />{program.sessionsPerWeek}x/semana</Badge>
@@ -1381,36 +1481,53 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {program.source === 'owned' && !isStudentMode && (
+                {isOwned && !isStudentMode && (
                   <>
-                    <Button size="sm" variant="outline" className="gap-2" onClick={(e) => { e.stopPropagation(); void openContentDialog(program) }}>
+                    <Button size="sm" variant="outline" className="gap-2 rounded-xl border-border/70 bg-background/60" onClick={(e) => { e.stopPropagation(); void openContentDialog(program) }}>
                       <ListChecks className="h-4 w-4" />Editar conteúdo
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-2" onClick={(e) => { e.stopPropagation(); void openEditDialog(program) }}>
+                    <Button size="sm" variant="outline" className="gap-2 rounded-xl border-border/70 bg-background/60" onClick={(e) => { e.stopPropagation(); void openEditDialog(program) }}>
                       <Pencil className="h-4 w-4" />Editar
                     </Button>
                   </>
                 )}
 
-                {(program.source === 'public' || program.source === 'assigned') && (
-                  isActive ? (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={(e) => { e.stopPropagation(); void handleDeactivateProgram() }}
-                      disabled={changingProgram === program.id}
-                      className="gap-2"
-                    >
-                      <Square className="h-4 w-4" />{changingProgram === program.id ? 'Desativando...' : 'Desativar'}
-                    </Button>
-                  ) : (
-                    <Button size="sm" onClick={(e) => { e.stopPropagation(); void handleStartProgram(program) }} disabled={changingProgram === program.id}>
-                      {changingProgram === program.id ? 'Iniciando...' : 'Iniciar'}
-                    </Button>
-                  )
+                {isActive ? (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={(e) => { e.stopPropagation(); void handleDeactivateProgram() }}
+                    disabled={changingProgram === program.id}
+                    className="gap-2 rounded-xl"
+                  >
+                    <Square className="h-4 w-4" />{changingProgram === program.id ? 'Desativando...' : 'Desativar'}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={(e) => { e.stopPropagation(); void handleStartProgram(program) }}
+                    disabled={changingProgram === program.id || !canChangeActiveProgram}
+                    className="gap-2 rounded-xl bg-sky-500 text-white hover:bg-sky-400"
+                  >
+                    <Play className="h-4 w-4" />{changingProgram === program.id ? 'Iniciando...' : 'Iniciar'}
+                  </Button>
                 )}
 
-                {expandedProgram === program.id ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
+                {canDeleteProgram && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(e) => { e.stopPropagation(); void handleDeleteProgram(program) }}
+                    disabled={deletingProgramId === program.id}
+                    className="gap-2 rounded-xl border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:text-red-200"
+                  >
+                    <Trash2 className="h-4 w-4" />{deletingProgramId === program.id ? 'Excluindo...' : 'Excluir'}
+                  </Button>
+                )}
+
+                <div className="ml-1 rounded-xl border border-border/70 bg-background/60 p-2">
+                  {expandedProgram === program.id ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                </div>
               </div>
             </div>
           </div>
@@ -1428,35 +1545,52 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         <span className="font-medium text-white">{day.day_title ?? `Dia ${day.weekday}`}</span>
                       </div>
 
-                      <div className="space-y-1">
+                      <div className="space-y-3">
                         {day.items.length === 0 ? (
                           <div className="text-sm text-muted-foreground">Sem exercícios (descanso).</div>
                         ) : (
-                                                    day.items.map((it, idx) => {
+                          day.items.map((it, idx) => {
                             const name = it.exercise_name || it.custom_exercise_name || 'Exercício'
-                            const isCardio = it.block === 'cardio'
                             const conflicts = itemConflictsWithInjuries(it, injuryAlerts)
+                            const metaLabel = buildItemMeta(it)
+                            const typeLabel = getItemTypeLabel(it)
 
                             return (
-                              <div key={it.id ?? idx} className="flex items-center justify-between gap-3 text-sm">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="text-muted-foreground">{name}</span>
+                              <div key={it.id ?? idx} className="rounded-2xl border border-border/70 bg-background/40 p-4 shadow-sm">
+                                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                  <div className="min-w-0 flex-1 space-y-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Badge className={`border text-[11px] font-medium ${getItemTypeClasses(it)}`}>{typeLabel}</Badge>
+                                      <div className="text-base font-semibold leading-tight text-white">{name}</div>
+                                      {conflicts.length > 0 && (
+                                        <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
+                                          Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
+                                        </Badge>
+                                      )}
+                                    </div>
 
-                                    {conflicts.length > 0 && (
-                                      <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
-                                        Cuidado: {conflicts.map((conflict) => conflict.bodyPart).join(', ')}
+                                    <div className="flex flex-wrap gap-2">
+                                      <Badge variant="secondary" className="rounded-lg bg-white/10 px-2.5 py-1 text-[12px] font-semibold text-white">
+                                        {metaLabel}
                                       </Badge>
+                                      {it.block === 'cardio' && (it.zone_min_bpm || it.zone_max_bpm) && (
+                                        <Badge variant="outline" className="rounded-lg border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[12px] text-cyan-300">
+                                          Ritmo guiado
+                                        </Badge>
+                                      )}
+                                    </div>
+
+                                    {it.notes && (
+                                      <div className="rounded-xl border border-border/60 bg-card/60 px-3 py-2">
+                                        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-white/60">Observações</div>
+                                        <div className="whitespace-pre-line text-sm leading-6 text-white/85">{it.notes}</div>
+                                      </div>
                                     )}
                                   </div>
-                                </div>
 
-                                <div className="flex items-center gap-2">
-                                  <span className="text-white whitespace-nowrap">
-                                    {isCardio ? `${it.duration_min ?? 0}min ${it.notes ? `(${it.notes})` : ''}` : `${it.sets ?? 0}x${it.reps ?? '-'} ${it.notes ? `(${it.notes})` : ''}`}
-                                  </span>
-
-                                  <ExerciseHelpMenu exerciseName={name} />
+                                  <div className="flex shrink-0 items-start justify-end lg:pl-3">
+                                    <ExerciseHelpMenu exerciseName={name} />
+                                  </div>
                                 </div>
                               </div>
                             )
@@ -1870,8 +2004,8 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                     {openNewItemDayId === day.id && (
                       <div className="mb-4 space-y-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
                         <div className="flex flex-wrap gap-2">
-                          <Button type="button" size="sm" variant={newItemForm.block === 'strength' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'strength', trackingMode: 'strength' }))}>Força / Mobilidade</Button>
-                          <Button type="button" size="sm" variant={newItemForm.block === 'cardio' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'cardio', trackingMode: 'cardio' }))}>Cardio</Button>
+                          <Button type="button" size="sm" variant={newItemForm.block === 'strength' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'strength' }))}>Força</Button>
+                          <Button type="button" size="sm" variant={newItemForm.block === 'cardio' ? 'default' : 'outline'} onClick={() => setNewItemForm((prev) => ({ ...prev, block: 'cardio' }))}>Cardio</Button>
                         </div>
 
                         <div className="space-y-2">
@@ -1923,20 +2057,13 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                               <Input type="number" value={newItemForm.sets} onChange={(e) => setNewItemForm((prev) => ({ ...prev, sets: e.target.value }))} placeholder="4" />
                             </div>
                             <div className="space-y-2">
-                              <Label>{newItemForm.trackingMode === 'mobility' ? 'Reps (opcional)' : 'Reps'}</Label>
-                              <Input value={newItemForm.reps} onChange={(e) => setNewItemForm((prev) => ({ ...prev, reps: e.target.value }))} placeholder={newItemForm.trackingMode === 'mobility' ? '10' : '8-12'} />
+                              <Label>Reps</Label>
+                              <Input value={newItemForm.reps} onChange={(e) => setNewItemForm((prev) => ({ ...prev, reps: e.target.value }))} placeholder="8-12" />
                             </div>
-                            {newItemForm.trackingMode === 'mobility' ? (
-                              <div className="space-y-2">
-                                <Label>Tempo por série (min)</Label>
-                                <Input type="number" value={newItemForm.duration_min} onChange={(e) => setNewItemForm((prev) => ({ ...prev, duration_min: e.target.value }))} placeholder="1" />
-                              </div>
-                            ) : (
-                              <div className="space-y-2">
-                                <Label>Carga alvo (kg)</Label>
-                                <Input type="number" value={newItemForm.target_weight} onChange={(e) => setNewItemForm((prev) => ({ ...prev, target_weight: e.target.value }))} placeholder="20" />
-                              </div>
-                            )}
+                            <div className="space-y-2">
+                              <Label>Carga alvo (kg)</Label>
+                              <Input type="number" value={newItemForm.target_weight} onChange={(e) => setNewItemForm((prev) => ({ ...prev, target_weight: e.target.value }))} placeholder="20" />
+                            </div>
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -1984,7 +2111,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <Badge variant={isCardio ? 'secondary' : 'outline'}>
-                                      {isCardio ? 'Cardio' : ((item.duration_min ?? 0) > 0 && !item.target_weight ? 'Mobilidade' : 'Força')}
+                                      {isCardio ? 'Cardio' : 'Força'}
                                     </Badge>
                                     <span className="font-medium text-white">{name}</span>
                                     {item.exercise_id ? (
@@ -2003,12 +2130,6 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                           <> • Zona: <strong>{item.zone_min_bpm ?? '-'} - {item.zone_max_bpm ?? '-'} bpm</strong></>
                                         ) : null}
                                       </>
-                                    ) : ((item.duration_min ?? 0) > 0 && !item.target_weight ? (
-                                      <>
-                                        Séries: <strong>{item.sets ?? 0}</strong>
-                                        {item.reps ? <> • Reps: <strong>{item.reps}</strong></> : null}
-                                        <> • Tempo: <strong>{item.duration_min ?? 0} min</strong></>
-                                      </>
                                     ) : (
                                       <>
                                         Séries: <strong>{item.sets ?? 0}</strong> • Reps: <strong>{item.reps ?? '-'}</strong>
@@ -2016,7 +2137,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                           <> • Carga alvo: <strong>{item.target_weight} kg</strong></>
                                         ) : null}
                                       </>
-                                    ))}
+                                    )}
                                   </div>
 
                                   {item.notes ? (
