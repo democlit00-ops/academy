@@ -52,6 +52,25 @@ export default function CoachStudents({ onOpenStudent }: CoachStudentsProps) {
     if (!user) return
     setLoading(true)
     try {
+      if (role === 'admin') {
+        const { data: profiles, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, full_name, email, role')
+          .eq('role', 'user')
+          .order('full_name', { ascending: true })
+          .order('email', { ascending: true })
+
+        if (profilesError) throw profilesError
+
+        const mapped: StudentRow[] = ((profiles ?? []) as ProfileRow[]).map((studentProfile) => ({
+          student_id: studentProfile.id,
+          profiles: studentProfile,
+        }))
+
+        setStudents(mapped)
+        return
+      }
+
       const { data: links, error: linksError } = await supabase
         .from('coach_students')
         .select('student_id')
@@ -123,9 +142,13 @@ export default function CoachStudents({ onOpenStudent }: CoachStudentsProps) {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Users className="w-6 h-6 text-primary" />
-            Meus Alunos
+            {role === 'admin' ? 'Selecionar Aluno' : 'Meus Alunos'}
           </h1>
-          <p className="text-muted-foreground">Acompanhe treinos, cardio e fisiológico dos seus alunos</p>
+          <p className="text-muted-foreground">
+            {role === 'admin'
+              ? 'Abra o Modo Aluno para consultar treinos, cardio e fisiológico'
+              : 'Acompanhe treinos, cardio e fisiológico dos seus alunos'}
+          </p>
         </div>
 
         <Button variant="outline" onClick={load}>
@@ -133,8 +156,12 @@ export default function CoachStudents({ onOpenStudent }: CoachStudentsProps) {
         </Button>
       </div>
 
-      <CoachLimitCard coachId={user.id} />
-      <CoachInvites />
+      {role === 'coach' && (
+        <>
+          <CoachLimitCard coachId={user.id} />
+          <CoachInvites />
+        </>
+      )}
 
       <Card className="bg-card border-border">
         <CardHeader>
@@ -161,7 +188,9 @@ export default function CoachStudents({ onOpenStudent }: CoachStudentsProps) {
           {loading && <div className="text-white/70">Carregando...</div>}
 
           {!loading && filtered.length === 0 && (
-            <div className="text-muted-foreground">Nenhum aluno vinculado ainda.</div>
+            <div className="text-muted-foreground">
+              {role === 'admin' ? 'Nenhum aluno encontrado.' : 'Nenhum aluno vinculado ainda.'}
+            </div>
           )}
 
           {!loading &&

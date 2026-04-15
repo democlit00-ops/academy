@@ -1047,6 +1047,36 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     }
   }
 
+  const assignProgramToSelectedStudent = async (planId: string) => {
+    if (!user || !selectedUserId) return
+
+    const currentAssigned = planStudentIds[planId] ?? []
+    if (currentAssigned.includes(selectedUserId)) {
+      toast.info('Esse programa já está atribuído ao aluno selecionado.')
+      return
+    }
+
+    try {
+      setSavingAssignmentsForPlanId(planId)
+      const { error } = await supabase.from('plan_students').insert({
+        plan_id: planId,
+        student_id: selectedUserId,
+        assigned_by: user.id,
+      })
+      if (error) throw error
+
+      const nextAssigned = [...currentAssigned, selectedUserId]
+      setPlanStudentIds((prev) => ({ ...prev, [planId]: nextAssigned }))
+      setDraftPlanStudentIds((prev) => ({ ...prev, [planId]: nextAssigned }))
+      toast.success(`Programa atribuído para ${targetUserLabel}!`)
+      await reloadPrograms()
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao atribuir programa para o aluno.')
+    } finally {
+      setSavingAssignmentsForPlanId(null)
+    }
+  }
+
   const openCreateDialog = () => {
     setProgramForm(emptyProgramForm())
     setEditingProgramId(null)
@@ -1493,6 +1523,10 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     const isActive = activeProgramId === program.id
     const isOwned = program.source === 'owned'
     const canDeleteProgram = isOwned && !isStudentMode
+    const assignedCount = (planStudentIds[program.id] ?? []).length
+    const isAssignedToSelectedStudent = selectedUserId
+      ? (planStudentIds[program.id] ?? []).includes(selectedUserId)
+      : false
 
     return (
       <Card key={program.id} className={`overflow-hidden border bg-card/95 shadow-sm transition-all ${isActive ? 'border-primary/50 shadow-[0_0_0_1px_rgba(59,130,246,0.2)]' : 'border-border hover:border-primary/20'}`}>
@@ -1540,6 +1574,41 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
               </div>
 
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {isOwned && program.visibility === 'private' && canManagePrograms && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2 rounded-xl border-border/70 bg-background/60"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (isStudentMode && selectedUserId) {
+                        void assignProgramToSelectedStudent(program.id)
+                        return
+                      }
+                      setAssignPanelPlanId(assignPanelPlanId === program.id ? null : program.id)
+                      if (assignPanelPlanId !== program.id) {
+                        setDraftPlanStudentIds((prev) => ({
+                          ...prev,
+                          [program.id]: planStudentIds[program.id] ?? [],
+                        }))
+                      }
+                    }}
+                    disabled={
+                      savingAssignmentsForPlanId === program.id ||
+                      (isStudentMode && isAssignedToSelectedStudent)
+                    }
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    {isStudentMode
+                      ? isAssignedToSelectedStudent
+                        ? 'Já atribuído'
+                        : savingAssignmentsForPlanId === program.id
+                          ? 'Atribuindo...'
+                          : 'Atribuir ao aluno'
+                      : `Atribuir (${assignedCount})`}
+                  </Button>
+                )}
+
                 {isOwned && !isStudentMode && (
                   <>
                     <Button size="sm" variant="outline" className="gap-2 rounded-xl border-border/70 bg-background/60" onClick={(e) => { e.stopPropagation(); void openContentDialog(program) }}>
@@ -1663,7 +1732,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
             </div>
           )}
 
-          {renderAssignmentPanel(program)}
+          {!isStudentMode && renderAssignmentPanel(program)}
         </CardContent>
       </Card>
     )

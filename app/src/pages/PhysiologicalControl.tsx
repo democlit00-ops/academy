@@ -1,5 +1,5 @@
 //academy\app\src\pages\PhysiologicalControl.tsx
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, Moon, Save, Heart, Wind, Droplets, History, User, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,7 +18,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { getTodayLocalDateString, formatLocalDate } from '@/lib/date'
 
 interface PhysiologicalControlProps {
-  onSave: (data: PhysiologicalData) => void
+  onSave: (data: PhysiologicalData) => void | Promise<void>
   physioData: PhysiologicalData[]
   selectedUserId?: string | null
   selectedUserLabel?: string | null
@@ -151,6 +151,10 @@ export function PhysiologicalControl({
 
 const handleDeletePhysio = async (entryId: string) => {
   if (!effectiveUserId) return
+  if (isStudentMode) {
+    toast.error('No Modo Aluno, o registro fisiológico fica em visualização nesta versão.')
+    return
+  }
 
   const confirmed = window.confirm('Tem certeza que deseja excluir este registro fisiológico?')
   if (!confirmed) return
@@ -176,7 +180,7 @@ const handleDeletePhysio = async (entryId: string) => {
   }
 }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (isStudentMode) {
       toast.error('No Modo Aluno, o registro está apenas para visualização por enquanto.')
       return
@@ -200,11 +204,14 @@ const handleDeletePhysio = async (entryId: string) => {
       notes: notes || undefined,
     }
 
-    onSave(data)
-
-    setHistory((prev) => [data, ...prev].slice(0, 30))
-    void loadHistory()
-    resetForm()
+    try {
+      await Promise.resolve(onSave(data))
+      setHistory((prev) => [data, ...prev].slice(0, 30))
+      void loadHistory()
+      resetForm()
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao salvar registro fisiológico.')
+    }
   }
 
   const latestData = useMemo(() => {
@@ -526,7 +533,9 @@ const handleDeletePhysio = async (entryId: string) => {
       <TableHead className="text-muted-foreground">Sono</TableHead>
       <TableHead className="text-muted-foreground">SpO2</TableHead>
       <TableHead className="text-muted-foreground">Cansaço</TableHead>
-      <TableHead className="text-right text-muted-foreground">Ações</TableHead>
+      {!isStudentMode && (
+        <TableHead className="text-right text-muted-foreground">Ações</TableHead>
+      )}
     </TableRow>
   </TableHeader>
 
@@ -535,9 +544,8 @@ const handleDeletePhysio = async (entryId: string) => {
       const isExpanded = expandedIds.includes(h.id)
 
       return (
-        <>
+        <Fragment key={h.id}>
           <TableRow
-            key={h.id}
             className="cursor-pointer border-border transition-colors hover:bg-white/5"
             onClick={() => toggleExpanded(h.id)}
           >
@@ -576,25 +584,27 @@ const handleDeletePhysio = async (entryId: string) => {
               </Badge>
             </TableCell>
 
-            <TableCell className="text-right">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                disabled={deletingId === h.id}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void handleDeletePhysio(h.id)
-                }}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </TableCell>
+            {!isStudentMode && (
+              <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  disabled={deletingId === h.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void handleDeletePhysio(h.id)
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </TableCell>
+            )}
           </TableRow>
 
           {isExpanded && (
             <TableRow className="border-border bg-white/[0.03]">
-              <TableCell colSpan={8}>
+              <TableCell colSpan={isStudentMode ? 7 : 8}>
                 <div className="space-y-4 py-2">
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-xl border border-border bg-background/40 p-4">
@@ -697,13 +707,13 @@ const handleDeletePhysio = async (entryId: string) => {
               </TableCell>
             </TableRow>
           )}
-        </>
+        </Fragment>
       )
     })}
 
     {!historyLoading && history.length === 0 && (
       <TableRow>
-        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+        <TableCell colSpan={isStudentMode ? 7 : 8} className="py-8 text-center text-muted-foreground">
           Nenhum registro fisiológico ainda
         </TableCell>
       </TableRow>
@@ -711,7 +721,7 @@ const handleDeletePhysio = async (entryId: string) => {
 
     {historyLoading && (
       <TableRow>
-        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+        <TableCell colSpan={isStudentMode ? 7 : 8} className="py-8 text-center text-muted-foreground">
           Carregando histórico...
         </TableCell>
       </TableRow>

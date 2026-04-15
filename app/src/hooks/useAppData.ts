@@ -5,7 +5,6 @@ import type {
   CardioSession,
   PhysiologicalData,
   UserSettings,
-  WorkoutSplit,
 } from '@/types';
 
 type UseAppDataReturn = {
@@ -15,12 +14,6 @@ type UseAppDataReturn = {
   setCardioSessions: React.Dispatch<React.SetStateAction<CardioSession[]>>;
   physiologicalData: PhysiologicalData[];
   setPhysiologicalData: React.Dispatch<React.SetStateAction<PhysiologicalData[]>>;
-  splits: WorkoutSplit[];
-  setSplits: React.Dispatch<React.SetStateAction<WorkoutSplit[]>>;
-  activeSplitId: string;
-  setActiveSplitId: React.Dispatch<React.SetStateAction<string>>;
-  injuries: any[];
-  setInjuries: React.Dispatch<React.SetStateAction<any[]>>;
   settings: UserSettings;
   setSettings: React.Dispatch<React.SetStateAction<UserSettings>>;
   reloadAppData: () => Promise<void>;
@@ -59,9 +52,6 @@ export function useAppData(userKey: string): UseAppDataReturn {
   const [workoutSessions, setWorkoutSessions] = useState<WorkoutSession[]>([]);
   const [cardioSessions, setCardioSessions] = useState<CardioSession[]>([]);
   const [physiologicalData, setPhysiologicalData] = useState<PhysiologicalData[]>([]);
-  const [splits, setSplits] = useState<WorkoutSplit[]>([]);
-  const [activeSplitId, setActiveSplitId] = useState<string>('');
-  const [injuries, setInjuries] = useState<any[]>([]);
   const [settings, setSettings] = useState<UserSettings>(defaultSettings);
 
   const reloadAppData = useCallback(async () => {
@@ -69,9 +59,6 @@ export function useAppData(userKey: string): UseAppDataReturn {
       setWorkoutSessions([]);
       setCardioSessions([]);
       setPhysiologicalData([]);
-      setSplits([]);
-      setActiveSplitId('');
-      setInjuries([]);
       setSettings(defaultSettings);
       return;
     }
@@ -140,23 +127,15 @@ export function useAppData(userKey: string): UseAppDataReturn {
     } else {
       setSettings(defaultSettings);
     }
-
-    // Split/programa real já está no banco em outras páginas.
-    // Mantemos vazio aqui até consolidar de vez a arquitetura.
-    setSplits([]);
-    setActiveSplitId('');
-
-    // Lesões hoje já têm página própria integrada ao banco.
-    setInjuries([]);
   }, [userKey]);
 
   useEffect(() => {
-  const id = setTimeout(() => {
-    void reloadAppData();
-  }, 0);
+    const id = setTimeout(() => {
+      void reloadAppData();
+    }, 0);
 
-  return () => clearTimeout(id);
-}, [reloadAppData]);
+    return () => clearTimeout(id);
+  }, [reloadAppData]);
 
   return {
     workoutSessions,
@@ -165,12 +144,6 @@ export function useAppData(userKey: string): UseAppDataReturn {
     setCardioSessions,
     physiologicalData,
     setPhysiologicalData,
-    splits,
-    setSplits,
-    activeSplitId,
-    setActiveSplitId,
-    injuries,
-    setInjuries,
     settings,
     setSettings,
     reloadAppData,

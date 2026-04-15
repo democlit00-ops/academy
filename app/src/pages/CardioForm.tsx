@@ -1,5 +1,5 @@
 //academy\app\src\pages\CardioForm.tsx
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Heart, Save, Flame, History, User, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -319,6 +319,10 @@ const toggleExpanded = (id: string) => {
 
 const handleDeleteCardio = async (cardioId: string) => {
   if (!effectiveUserId) return
+  if (isStudentMode) {
+    toast.error('No Modo Aluno, o cardio fica em visualização nesta versão.')
+    return
+  }
 
   const confirmed = window.confirm('Tem certeza que deseja excluir este cardio do histórico?')
   if (!confirmed) return
@@ -377,9 +381,13 @@ const handleDeleteCardio = async (cardioId: string) => {
       notes: notes || undefined,
     }
 
-    await Promise.resolve(onSave(cardio))
-    void loadHistory()
-    resetForm()
+    try {
+      await Promise.resolve(onSave(cardio))
+      void loadHistory()
+      resetForm()
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao salvar cardio.')
+    }
   }
 
   return (
@@ -687,7 +695,9 @@ const handleDeleteCardio = async (cardioId: string) => {
       <TableHead className="text-muted-foreground">Distância</TableHead>
       <TableHead className="text-muted-foreground">FC</TableHead>
       <TableHead className="text-muted-foreground">Zona</TableHead>
-      <TableHead className="text-right text-muted-foreground">Ações</TableHead>
+      {!isStudentMode && (
+        <TableHead className="text-right text-muted-foreground">Ações</TableHead>
+      )}
     </TableRow>
   </TableHeader>
 
@@ -696,9 +706,8 @@ const handleDeleteCardio = async (cardioId: string) => {
       const isExpanded = expandedIds.includes(h.id)
 
       return (
-        <>
+        <Fragment key={h.id}>
           <TableRow
-            key={h.id}
             className="cursor-pointer border-border transition-colors hover:bg-white/5"
             onClick={() => toggleExpanded(h.id)}
           >
@@ -732,25 +741,27 @@ const handleDeleteCardio = async (cardioId: string) => {
               </Badge>
             </TableCell>
 
-            <TableCell className="text-right">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                disabled={deletingId === h.id}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void handleDeleteCardio(h.id)
-                }}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </TableCell>
+            {!isStudentMode && (
+              <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  disabled={deletingId === h.id}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void handleDeleteCardio(h.id)
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </TableCell>
+            )}
           </TableRow>
 
           {isExpanded && (
             <TableRow className="border-border bg-white/[0.03]">
-              <TableCell colSpan={8}>
+              <TableCell colSpan={isStudentMode ? 7 : 8}>
                 <div className="space-y-4 py-2">
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-xl border border-border bg-background/40 p-4">
@@ -828,13 +839,13 @@ const handleDeleteCardio = async (cardioId: string) => {
               </TableCell>
             </TableRow>
           )}
-        </>
+        </Fragment>
       )
     })}
 
     {!historyLoading && history.length === 0 && (
       <TableRow>
-        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+        <TableCell colSpan={isStudentMode ? 7 : 8} className="py-8 text-center text-muted-foreground">
           Nenhum cardio registrado ainda
         </TableCell>
       </TableRow>
@@ -842,7 +853,7 @@ const handleDeleteCardio = async (cardioId: string) => {
 
     {historyLoading && (
       <TableRow>
-        <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+        <TableCell colSpan={isStudentMode ? 7 : 8} className="py-8 text-center text-muted-foreground">
           Carregando histórico...
         </TableCell>
       </TableRow>

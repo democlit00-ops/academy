@@ -90,6 +90,11 @@ export function Navigation({
   const isStudentMode = !!selectedStudentName
 
   const visibleItems = navItems
+  const mobileItems = [
+    ...visibleItems,
+    ...(role === 'admin' ? adminItems : []),
+    ...(role === 'coach' || role === 'admin' ? coachItems : []),
+  ]
 
   const displayName =
   profile?.full_name?.trim() ||
@@ -227,7 +232,7 @@ export function Navigation({
             <p className="mb-2 text-xs text-muted-foreground">Versão</p>
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-white">AcademyK v2.2</p>
+                <p className="text-sm font-medium text-white">AcademyK v3.0</p>
                 <p className="truncate text-[11px] text-muted-foreground">{roleLabel}</p>
               </div>
               {isStudentMode && (
@@ -242,7 +247,7 @@ export function Navigation({
 
       <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-lg lg:hidden">
   <div className="flex items-center gap-2 overflow-x-auto px-3 py-2">
-          {visibleItems.map((item) => {
+          {mobileItems.map((item) => {
             const Icon = item.icon
             const isActive = currentPage === item.id
 

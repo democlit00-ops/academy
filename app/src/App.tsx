@@ -136,14 +136,12 @@ useEffect(() => {
 useEffect(() => {
   const loadLinkedCoachName = async () => {
     if (!user?.id) {
-      console.log('[linkedCoach] sem user.id');
       setLinkedCoachName(null);
       return;
     }
 
 
     try {
-      console.log('[linkedCoach] user.id:', user.id);
 
       const { data: link, error: linkError } = await supabase
         .from('coach_students')
@@ -151,13 +149,10 @@ useEffect(() => {
         .eq('student_id', user.id)
         .maybeSingle();
 
-      console.log('[linkedCoach] coach_students result:', link);
-      console.log('[linkedCoach] coach_students error:', linkError);
 
       if (linkError) throw linkError;
 
       if (!link?.coach_id) {
-        console.log('[linkedCoach] nenhum coach_id encontrado');
         setLinkedCoachName(null);
         return;
       }
@@ -168,15 +163,12 @@ useEffect(() => {
         .eq('id', link.coach_id)
         .maybeSingle();
 
-      console.log('[linkedCoach] profiles result:', coachProfile);
-      console.log('[linkedCoach] profiles error:', coachError);
 
       if (coachError) throw coachError;
 
       const coach = (coachProfile ?? null) as CoachProfileRow | null;
 
       if (!coach) {
-        console.log('[linkedCoach] perfil do coach não encontrado');
         setLinkedCoachName(null);
         return;
       }
@@ -186,7 +178,6 @@ useEffect(() => {
         coach.email?.trim() ||
         null;
 
-      console.log('[linkedCoach] coachName final:', coachName);
       setLinkedCoachName(coachName);
     } catch (e: unknown) {
       console.error('[linkedCoach] erro:', e);
@@ -553,7 +544,6 @@ useEffect(() => {
         ) : null;
 
       case 'settings':
-  console.log('[settings] linkedCoachName:', linkedCoachName);
   return (
     <Settings
       settings={settings}

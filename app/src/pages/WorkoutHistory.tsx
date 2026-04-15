@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Calendar, ChevronDown, ChevronUp, Filter, Trash2, TrendingUp } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -91,6 +91,7 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
   const role = profile?.role ?? 'user'
 
   const effectiveUserId = selectedUserId || user?.id || ''
+  const isStudentMode = !!selectedUserId
 
   const [loading, setLoading] = useState(true)
   const [workouts, setWorkouts] = useState<WorkoutSession[]>([])
@@ -224,6 +225,10 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
 
   const handleDeleteWorkout = async (workoutId: string) => {
     if (!effectiveUserId) return
+    if (isStudentMode) {
+      toast.error('No Modo Aluno, o histórico de treinos fica em visualização nesta versão.')
+      return
+    }
 
     const confirmed = window.confirm('Tem certeza que deseja excluir este treino do histórico?')
     if (!confirmed) return
@@ -264,8 +269,21 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
         <div>
           <h1 className="text-2xl font-bold text-white">Histórico de Treinos</h1>
           <p className="text-muted-foreground">
-            {loading ? 'Carregando do servidor...' : 'Visualize e filtre seus treinos'}
+            {loading
+              ? 'Carregando do servidor...'
+              : isStudentMode
+                ? 'Consulte e filtre os treinos do aluno selecionado'
+                : 'Visualize e filtre seus treinos'}
           </p>
+
+          {isStudentMode && (
+            <div className="mt-2 inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary">
+              <Badge variant="secondary" className="bg-primary/15 text-primary">
+                Somente visualização
+              </Badge>
+              <span>Ações destrutivas ficam ocultas no Modo Aluno.</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -410,7 +428,9 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
                   <TableHead className="text-muted-foreground">Exercícios</TableHead>
                   <TableHead className="text-muted-foreground">Volume</TableHead>
                   <TableHead className="text-muted-foreground">RPE Médio</TableHead>
-                  <TableHead className="text-right text-muted-foreground">Ações</TableHead>
+                  {!isStudentMode && (
+                    <TableHead className="text-right text-muted-foreground">Ações</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
 
@@ -426,9 +446,8 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
                       : '-'
 
                   return (
-                    <>
+                    <Fragment key={workout.id}>
                       <TableRow
-                        key={workout.id}
                         className="cursor-pointer border-border transition-colors hover:bg-white/5"
                         onClick={() => toggleExpanded(workout.id)}
                       >
@@ -462,25 +481,27 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
 
                         <TableCell className="text-white">{avgRpe}</TableCell>
 
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                            disabled={deletingId === workout.id}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              void handleDeleteWorkout(workout.id)
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
+                        {!isStudentMode && (
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                              disabled={deletingId === workout.id}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void handleDeleteWorkout(workout.id)
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
 
                       {isExpanded && (
                         <TableRow className="border-border bg-white/[0.03]">
-                          <TableCell colSpan={7}>
+                          <TableCell colSpan={isStudentMode ? 6 : 7}>
                             <div className="space-y-4 py-2">
                               {workout.exercises.map((exercise, exerciseIndex) => (
                                 <div
@@ -512,6 +533,7 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
                                         <TableRow className="border-border hover:bg-transparent">
                                           <TableHead className="text-muted-foreground">Série</TableHead>
                                           <TableHead className="text-muted-foreground">Reps</TableHead>
+                                          <TableHead className="text-muted-foreground">Tempo</TableHead>
                                           <TableHead className="text-muted-foreground">Carga</TableHead>
                                           <TableHead className="text-muted-foreground">Volume</TableHead>
                                         </TableRow>
@@ -520,7 +542,10 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
                                         {exercise.sets.map((set, setIndex) => (
                                           <TableRow key={setIndex} className="border-border">
                                             <TableCell className="text-white">{setIndex + 1}</TableCell>
-                                            <TableCell className="text-white">{set.reps}</TableCell>
+                                            <TableCell className="text-white">{set.reps || '-'}</TableCell>
+                                            <TableCell className="text-white">
+                                              {set.durationSec ? `${set.durationSec}s` : '-'}
+                                            </TableCell>
                                             <TableCell className="text-white">{formatWeight(set.weight)}</TableCell>
                                             <TableCell className="text-white">
                                               {formatWeight((set.reps || 0) * (set.weight || 0))}
@@ -545,13 +570,13 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </Fragment>
                   )
                 })}
 
                 {!loading && filteredWorkouts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={isStudentMode ? 6 : 7} className="py-8 text-center text-muted-foreground">
                       Nenhum treino encontrado com os filtros selecionados
                     </TableCell>
                   </TableRow>
@@ -559,7 +584,7 @@ export function WorkoutHistory({ selectedUserId }: WorkoutHistoryProps) {
 
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={isStudentMode ? 6 : 7} className="py-8 text-center text-muted-foreground">
                       Carregando histórico...
                     </TableCell>
                   </TableRow>
