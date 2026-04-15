@@ -34,7 +34,7 @@ const defaultSettings: UserSettings = {
 
 function mapProfileToSettings(profile: any): UserSettings {
   return {
-    name: profile?.name ?? profile?.full_name ?? '',
+    name: profile?.full_name ?? '',
     age: profile?.age ?? undefined,
     weight: profile?.weight ?? undefined,
     height: profile?.height ?? undefined,

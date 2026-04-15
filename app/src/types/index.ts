@@ -75,6 +75,7 @@ export interface ExerciseDefinition {
 export interface WorkoutSet {
   reps: number
   weight: number // em kg
+  durationSec?: number
 }
 
 export interface WorkoutExercise {
@@ -107,6 +108,9 @@ export interface CardioSession {
   id: string
   date: string
   type: CardioType
+  exerciseId?: string
+  exerciseName?: string
+  programItemId?: string
   duration: number // em minutos
   distance?: number // em km
   avgSpeed?: number // km/h

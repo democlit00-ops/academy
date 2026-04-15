@@ -113,6 +113,16 @@ export function ExercisePicker({
     return ['all', ...all]
   }, [typeFilteredOptions])
 
+  const resolvedEquipmentFilter = useMemo(() => {
+    if (equipmentFilter === 'all') return 'all'
+
+    const equipmentStillAvailable = equipmentOptions.some(
+      (equipment) => normalizeText(equipment) === normalizeText(equipmentFilter)
+    )
+
+    return equipmentStillAvailable ? equipmentFilter : 'all'
+  }, [equipmentFilter, equipmentOptions])
+
   const filteredOptions = useMemo(() => {
     const normalizedQuery = normalizeText(query)
 
@@ -121,12 +131,12 @@ export function ExercisePicker({
         !normalizedQuery || buildSearchBlob(option).includes(normalizedQuery)
 
       const matchesEquipment =
-        equipmentFilter === 'all' ||
-        normalizeText(option.equipment) === normalizeText(equipmentFilter)
+        resolvedEquipmentFilter === 'all' ||
+        normalizeText(option.equipment) === normalizeText(resolvedEquipmentFilter)
 
       return matchesText && matchesEquipment
     })
-  }, [typeFilteredOptions, query, equipmentFilter])
+  }, [typeFilteredOptions, query, resolvedEquipmentFilter])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -139,18 +149,6 @@ export function ExercisePicker({
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
-
-  useEffect(() => {
-    if (equipmentFilter === 'all') return
-
-    const equipmentStillAvailable = equipmentOptions.some(
-      (equipment) => normalizeText(equipment) === normalizeText(equipmentFilter)
-    )
-
-    if (!equipmentStillAvailable) {
-      setEquipmentFilter('all')
-    }
-  }, [equipmentFilter, equipmentOptions])
 
   const handleSelect = (exerciseId: string) => {
     onValueChange(exerciseId)
@@ -249,7 +247,7 @@ export function ExercisePicker({
                     key={equipment}
                     type="button"
                     size="sm"
-                    variant={equipmentFilter === equipment ? 'default' : 'outline'}
+                    variant={resolvedEquipmentFilter === equipment ? 'default' : 'outline'}
                     onClick={() => setEquipmentFilter(equipment)}
                   >
                     {equipment === 'all' ? 'Todos' : equipment}
@@ -258,7 +256,7 @@ export function ExercisePicker({
               </div>
             </div>
 
-            {(query || quickType !== 'all' || equipmentFilter !== 'all') && (
+            {(query || quickType !== 'all' || resolvedEquipmentFilter !== 'all') && (
               <div className="flex justify-end">
                 <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
                   Limpar filtros

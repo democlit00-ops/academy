@@ -269,6 +269,7 @@ function SplitCard({
   isActive,
   canSetActive,
   onSetActive,
+  onDeactivate,
   onEdit,
   onDelete,
   canManage,

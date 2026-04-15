@@ -243,6 +243,9 @@ useEffect(() => {
 
   const handleSaveWorkout = async (workout: WorkoutSession) => {
     if (!user) return;
+    if (selectedStudentId) {
+      throw new Error('Modo Aluno está em consulta no treino. O salvamento foi bloqueado para evitar registrar no histórico do coach/admin.');
+    }
 
     try {
       const weekdayMap: Record<string, number> = {
@@ -350,7 +353,6 @@ useEffect(() => {
 
     try {
       const payload = {
-        name: newSettings.name ?? null,
         full_name: newSettings.name ?? null,
         age: newSettings.age ?? null,
         weight: newSettings.weight ?? null,

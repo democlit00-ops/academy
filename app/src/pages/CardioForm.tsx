@@ -18,9 +18,32 @@ import { useAuth } from '@/contexts/AuthContext'
 import { getTodayLocalDateString, formatLocalDate } from '@/lib/date'
 
 interface CardioFormProps {
-  onSave: (cardio: CardioSession) => void
+  onSave: (cardio: CardioSession) => void | Promise<void>
   selectedUserId?: string | null
   selectedUserLabel?: string | null
+}
+
+type DbProgramCardioItem = {
+  id: string
+  block: 'cardio'
+  exercise_id: string | null
+  custom_exercise_name: string | null
+  duration_min: number | null
+  zone_min_bpm: number | null
+  zone_max_bpm: number | null
+  notes: string | null
+  sort_order: number
+  exercises?: { name: string } | Array<{ name: string }> | null
+}
+
+type ProgramCardioSuggestion = {
+  planItemId: string
+  exerciseId: string
+  exerciseName: string
+  duration: number
+  zoneMinBpm?: number
+  zoneMaxBpm?: number
+  notes?: string
 }
 
 type DbCardioRow = {
@@ -87,6 +110,9 @@ export function CardioForm({
 
   const [historyLoading, setHistoryLoading] = useState(true)
   const [history, setHistory] = useState<CardioSession[]>([])
+  const [programCardioItems, setProgramCardioItems] = useState<ProgramCardioSuggestion[]>([])
+  const [loadingProgramCardio, setLoadingProgramCardio] = useState(false)
+  const [selectedProgramCardioItem, setSelectedProgramCardioItem] = useState<ProgramCardioSuggestion | null>(null)
 
   const [expandedIds, setExpandedIds] = useState<string[]>([])
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -107,6 +133,8 @@ export function CardioForm({
     () => HEART_RATE_ZONES.find((z) => z.zone === computedHeartRateZone),
     [computedHeartRateZone]
   )
+
+  const hasProgramCardioSuggestions = programCardioItems.length > 0
 
   const loadHistory = useCallback(async () => {
     if (!effectiveUserId) {
@@ -169,6 +197,94 @@ export function CardioForm({
     void loadHistory()
   }, [loadHistory])
 
+  useEffect(() => {
+    if (!effectiveUserId) {
+      setProgramCardioItems([])
+      setSelectedProgramCardioItem(null)
+      setLoadingProgramCardio(false)
+      return
+    }
+
+    const loadProgramCardio = async () => {
+      try {
+        setLoadingProgramCardio(true)
+
+        const { data: active, error: activeError } = await supabase
+          .from('user_active_plan')
+          .select('active_program_id')
+          .eq('user_id', effectiveUserId)
+          .maybeSingle()
+
+        if (activeError) throw activeError
+
+        const activeProgramId = active?.active_program_id ?? null
+        if (!activeProgramId) {
+          setProgramCardioItems([])
+          setSelectedProgramCardioItem(null)
+          return
+        }
+
+        const weekday = new Date(`${date}T00:00:00`).getDay()
+        const isoWeekday = weekday === 0 ? 7 : weekday
+
+        const { data: dayRow, error: dayError } = await supabase
+          .from('plan_days')
+          .select('id,weekday,day_title')
+          .eq('plan_id', activeProgramId)
+          .eq('weekday', isoWeekday)
+          .maybeSingle()
+
+        if (dayError) throw dayError
+        if (!dayRow?.id) {
+          setProgramCardioItems([])
+          setSelectedProgramCardioItem(null)
+          return
+        }
+
+        const { data: items, error: itemsError } = await supabase
+          .from('plan_items')
+          .select(`
+            id,block,exercise_id,custom_exercise_name,duration_min,zone_min_bpm,zone_max_bpm,notes,sort_order,
+            exercises:exercise_id ( name )
+          `)
+          .eq('plan_day_id', dayRow.id)
+          .eq('block', 'cardio')
+          .order('sort_order', { ascending: true })
+
+        if (itemsError) throw itemsError
+
+        const mapped = ((items ?? []) as unknown as DbProgramCardioItem[]).map((item) => {
+          const exerciseRef = Array.isArray(item.exercises) ? item.exercises[0] : item.exercises
+
+          return {
+            planItemId: item.id,
+            exerciseId: item.exercise_id ?? '',
+            exerciseName: exerciseRef?.name ?? item.custom_exercise_name ?? 'Cardio',
+            duration: Math.max(item.duration_min ?? 0, 0),
+            zoneMinBpm: item.zone_min_bpm ?? undefined,
+            zoneMaxBpm: item.zone_max_bpm ?? undefined,
+            notes: item.notes ?? undefined,
+          }
+        })
+
+        setProgramCardioItems(mapped)
+        setSelectedProgramCardioItem((current) =>
+          current && mapped.some((item) => item.planItemId === current.planItemId)
+            ? mapped.find((item) => item.planItemId === current.planItemId) ?? null
+            : null
+        )
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Erro ao carregar cardio do programa ativo.')
+        setProgramCardioItems([])
+        setSelectedProgramCardioItem(null)
+      } finally {
+        setLoadingProgramCardio(false)
+      }
+    }
+
+    void loadProgramCardio()
+  }, [effectiveUserId, date])
+
   const resetForm = () => {
     setDate(getTodayLocalDateString())
     setType('Esteira')
@@ -180,6 +296,19 @@ export function CardioForm({
     setCalories('')
     setSteps('')
     setNotes('')
+    setSelectedProgramCardioItem(null)
+  }
+
+  const applyProgramCardioToForm = (item: ProgramCardioSuggestion) => {
+    setSelectedProgramCardioItem(item)
+    setDuration(item.duration > 0 ? String(item.duration) : '')
+    setNotes(item.notes ?? '')
+
+    if (CARDIO_TYPES.includes(item.exerciseName as CardioType)) {
+      setType(item.exerciseName as CardioType)
+    } else {
+      setType('Outro')
+    }
   }
 
 const toggleExpanded = (id: string) => {
@@ -215,7 +344,7 @@ const handleDeleteCardio = async (cardioId: string) => {
   }
 }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (isStudentMode) {
       toast.error('No Modo Aluno, o cardio está apenas para visualização por enquanto.')
       return
@@ -234,6 +363,9 @@ const handleDeleteCardio = async (cardioId: string) => {
       id: crypto.randomUUID(),
       date,
       type,
+      exerciseId: selectedProgramCardioItem?.exerciseId || undefined,
+      exerciseName: selectedProgramCardioItem?.exerciseName || undefined,
+      programItemId: selectedProgramCardioItem?.planItemId || undefined,
       duration: parseInt(duration, 10),
       distance: distance ? parseFloat(distance) : undefined,
       avgSpeed: avgSpeed ? parseFloat(avgSpeed) : undefined,
@@ -245,8 +377,7 @@ const handleDeleteCardio = async (cardioId: string) => {
       notes: notes || undefined,
     }
 
-    onSave(cardio)
-    setHistory((prev) => [cardio, ...prev].slice(0, 30))
+    await Promise.resolve(onSave(cardio))
     void loadHistory()
     resetForm()
   }
@@ -272,6 +403,64 @@ const handleDeleteCardio = async (cardioId: string) => {
           )}
         </div>
       </div>
+
+      {(loadingProgramCardio || hasProgramCardioSuggestions) && (
+        <Card className="border-cyan-500/30 bg-cyan-500/10">
+          <CardContent className="pt-6">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="border-cyan-500/30 bg-cyan-500/20 text-cyan-300">
+                  Cardio do programa ativo
+                </Badge>
+              </div>
+
+              {loadingProgramCardio ? (
+                <p className="text-sm text-cyan-100">Carregando cardio do programa para a data selecionada...</p>
+              ) : (
+                <div className="space-y-3">
+                  {programCardioItems.map((item) => {
+                    const zoneLabel =
+                      item.zoneMinBpm || item.zoneMaxBpm
+                        ? `${item.zoneMinBpm ?? '-'}-${item.zoneMaxBpm ?? '-'} bpm`
+                        : null
+                    const isSelected = selectedProgramCardioItem?.planItemId === item.planItemId
+
+                    return (
+                      <div
+                        key={item.planItemId}
+                        className="rounded-lg border border-cyan-500/20 bg-background/40 px-4 py-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-white">{item.exerciseName}</div>
+                            <div className="text-xs text-cyan-100">
+                              {[`${item.duration} min`, zoneLabel].filter(Boolean).join(' • ') || 'Cardio do dia'}
+                            </div>
+                            {item.notes && (
+                              <div className="mt-1 text-xs text-muted-foreground">{item.notes}</div>
+                            )}
+                          </div>
+
+                          {!isStudentMode && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={isSelected ? 'secondary' : 'outline'}
+                              onClick={() => applyProgramCardioToForm(item)}
+                            >
+                              {isSelected ? 'Aplicado ao formulário' : 'Usar no cardio'}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="bg-card border-border">
         <CardHeader>

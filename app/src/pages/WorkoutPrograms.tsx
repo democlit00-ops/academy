@@ -162,6 +162,13 @@ type WorkoutSessionExerciseLite = {
   exerciseName?: string | null
 }
 
+type CardioSessionDataLite = {
+  type?: string | null
+  exerciseId?: string | null
+  exerciseName?: string | null
+  programItemId?: string | null
+}
+
 type DbInjuryRow = {
   id: string
   user_id: string
@@ -248,6 +255,32 @@ function normalizeProgressKey(value?: string | null) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim()
+}
+
+function getProgramItemProgressKeys(item: DbPlanItem) {
+  const exerciseName = item.exercise_name || item.custom_exercise_name || ''
+
+  return [
+    item.id ? `plan-item:${item.id}` : '',
+    normalizeProgressKey(item.exercise_id),
+    normalizeProgressKey(exerciseName),
+  ].filter(Boolean)
+}
+
+function isMobilityLikeExercise(exercise?: Pick<ExerciseRow, 'name' | 'category' | 'muscle_group'> | null) {
+  if (!exercise) return false
+  const category = String(exercise.category ?? '').toLowerCase()
+  const muscle = String(exercise.muscle_group ?? '').toLowerCase()
+  const name = String(exercise.name ?? '').toLowerCase()
+
+  return (
+    category.includes('mobilidade') ||
+    category.includes('core') ||
+    muscle.includes('mobilidade') ||
+    muscle.includes('core') ||
+    name.includes('isometr') ||
+    name.includes('prancha')
+  )
 }
 
 function normalizeInjuryKey(value?: string | null) {
@@ -406,16 +439,15 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const normalizedToday = rawToday.replace('-feira', '').trim()
   const todayLabel = normalizedToday.charAt(0).toUpperCase() + normalizedToday.slice(1)
   const todayProgramDay = activeProgramDays.find((day) => weekdayLabel(day.weekday) === todayLabel)
-  const todayProgramExercises = todayProgramDay ? (activeProgramItems[todayProgramDay.id] ?? []) : []
+  const todayProgramExercises = useMemo(
+    () => (todayProgramDay ? (activeProgramItems[todayProgramDay.id] ?? []) : []),
+    [todayProgramDay, activeProgramItems]
+  )
 
   const progress = useMemo(() => {
     const total = todayProgramExercises.length
     const completed = todayProgramExercises.filter((item) => {
-      const exerciseName = item.exercise_name || item.custom_exercise_name || ''
-      const keys = [
-        normalizeProgressKey(item.exercise_id),
-        normalizeProgressKey(exerciseName),
-      ].filter(Boolean)
+      const keys = getProgramItemProgressKeys(item)
 
       return keys.some((key) => completedTodayKeys.includes(key))
     }).length
@@ -447,17 +479,26 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
 
     try {
       const today = getTodayLocalDateString()
-      const { data, error } = await supabase
-        .from('workout_sessions')
-        .select('exercises')
-        .eq('user_id', targetUserId)
-        .eq('session_date', today)
+      const [{ data: workoutData, error: workoutError }, { data: cardioData, error: cardioError }] =
+        await Promise.all([
+          supabase
+            .from('workout_sessions')
+            .select('exercises')
+            .eq('user_id', targetUserId)
+            .eq('session_date', today),
+          supabase
+            .from('cardio_sessions')
+            .select('data')
+            .eq('user_id', targetUserId)
+            .eq('session_date', today),
+        ])
 
-      if (error) throw error
+      if (workoutError) throw workoutError
+      if (cardioError) throw cardioError
 
       const keys = new Set<string>()
 
-      for (const row of (data ?? []) as Array<{ exercises?: unknown }>) {
+      for (const row of (workoutData ?? []) as Array<{ exercises?: unknown }>) {
         if (!Array.isArray(row.exercises)) continue
 
         for (const rawExercise of row.exercises as WorkoutSessionExerciseLite[]) {
@@ -469,9 +510,22 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
         }
       }
 
+      for (const row of (cardioData ?? []) as Array<{ data?: unknown }>) {
+        const cardio = (row.data ?? {}) as CardioSessionDataLite
+        const programItemKey = cardio.programItemId ? `plan-item:${cardio.programItemId}` : ''
+        const byId = normalizeProgressKey(cardio.exerciseId)
+        const byName = normalizeProgressKey(cardio.exerciseName)
+        const byType = normalizeProgressKey(cardio.type)
+
+        if (programItemKey) keys.add(programItemKey)
+        if (byId) keys.add(byId)
+        if (byName) keys.add(byName)
+        if (byType) keys.add(byType)
+      }
+
       setCompletedTodayKeys(Array.from(keys))
     } catch (e: any) {
-      toast.error(e?.message ?? 'Erro ao carregar progresso do treino de hoje.')
+      toast.error(e?.message ?? 'Erro ao carregar progresso do programa de hoje.')
     }
   }, [targetUserId])
 
@@ -1156,8 +1210,13 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       return
     }
 
-    if (newItemForm.block === 'strength' && (!newItemForm.sets.trim() || !newItemForm.reps.trim())) {
-      toast.error('Informe séries e reps para item de força.')
+    if (newItemForm.block === 'strength' && !newItemForm.sets.trim()) {
+      toast.error('Informe as séries do item.')
+      return
+    }
+
+    if (newItemForm.block === 'strength' && !newItemForm.reps.trim() && !newItemForm.duration_min.trim()) {
+      toast.error('Informe reps ou tempo por série para o item.')
       return
     }
 
@@ -1180,7 +1239,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
         sets: newItemForm.block === 'strength' ? Number(newItemForm.sets) : null,
         reps: newItemForm.block === 'strength' ? newItemForm.reps.trim() : null,
         target_weight: newItemForm.block === 'strength' && newItemForm.target_weight.trim() ? Number(newItemForm.target_weight) : null,
-        duration_min: newItemForm.block === 'cardio' && newItemForm.duration_min.trim() ? Number(newItemForm.duration_min) : null,
+        duration_min: newItemForm.duration_min.trim() ? Number(newItemForm.duration_min) : null,
         zone_min_bpm: newItemForm.block === 'cardio' && newItemForm.zone_min_bpm.trim() ? Number(newItemForm.zone_min_bpm) : null,
         zone_max_bpm: newItemForm.block === 'cardio' && newItemForm.zone_max_bpm.trim() ? Number(newItemForm.zone_max_bpm) : null,
         notes: newItemForm.notes.trim() || null,
@@ -1312,14 +1371,14 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const getItemTypeLabel = (item: DbPlanItem) => {
     if (item.block === 'cardio') return 'Cardio'
     const muscle = String(item.muscle_group ?? '').toLowerCase()
-    if (muscle.includes('mobilidade') || muscle.includes('core')) return 'Mobilidade'
+    if (muscle.includes('mobilidade') || muscle.includes('core') || (item.duration_min ?? 0) > 0) return 'Mobilidade'
     return 'Força'
   }
 
   const getItemTypeClasses = (item: DbPlanItem) => {
     if (item.block === 'cardio') return 'border-cyan-400/30 bg-cyan-500/10 text-cyan-300'
     const muscle = String(item.muscle_group ?? '').toLowerCase()
-    if (muscle.includes('mobilidade') || muscle.includes('core')) return 'border-violet-400/30 bg-violet-500/10 text-violet-300'
+    if (muscle.includes('mobilidade') || muscle.includes('core') || (item.duration_min ?? 0) > 0) return 'border-violet-400/30 bg-violet-500/10 text-violet-300'
     return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300'
   }
 
@@ -1333,8 +1392,8 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
 
     const parts = [] as string[]
     if ((item.sets ?? 0) > 0) parts.push(`${item.sets} série${item.sets === 1 ? '' : 's'}`)
+    if ((item.duration_min ?? 0) > 0) parts.push(`${item.duration_min}s por série`)
     if (item.reps) parts.push(`${item.reps} reps`)
-    if ((item.duration_min ?? 0) > 0) parts.push(`${item.duration_min} min`)
     if ((item.target_weight ?? 0) > 0) parts.push(`${item.target_weight} kg alvo`)
     return parts.join(' • ') || 'Sem meta definida'
   }
@@ -1725,7 +1784,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
             <div>
               <div className="mb-1 flex justify-between text-sm">
                 <span className="text-muted-foreground">Progresso</span>
-                <span className="text-white">{progress.completed} / {progress.total} exercícios</span>
+                <span className="text-white">{progress.completed} / {progress.total} itens</span>
               </div>
               <Progress value={progress.percent} className="h-2" />
             </div>
@@ -1773,12 +1832,9 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         const exerciseName = item.exercise_name || item.custom_exercise_name || 'Exercício'
                         const meta = item.block === 'cardio'
                           ? [`${item.duration_min ?? 0} min`, item.zone_min_bpm || item.zone_max_bpm ? `${item.zone_min_bpm ?? '-'}-${item.zone_max_bpm ?? '-'} bpm` : null].filter(Boolean).join(' • ')
-                          : [`${item.sets ?? 0} séries`, item.reps ? `${item.reps} reps` : null].filter(Boolean).join(' • ')
+                          : [`${item.sets ?? 0} séries`, (item.duration_min ?? 0) > 0 ? `${item.duration_min}s por série` : null, item.reps ? `${item.reps} reps` : null].filter(Boolean).join(' • ')
 
-                        const exerciseKeys = [
-                          normalizeProgressKey(item.exercise_id),
-                          normalizeProgressKey(exerciseName),
-                        ].filter(Boolean)
+                        const exerciseKeys = getProgramItemProgressKeys(item)
                         const isCompleted = exerciseKeys.some((key) => completedTodayKeys.includes(key))
                         const conflicts = itemConflictsWithInjuries(item, injuryAlerts)
 
@@ -2051,14 +2107,18 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         )}
 
                         {newItemForm.block === 'strength' ? (
-                          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                             <div className="space-y-2">
                               <Label>Séries</Label>
                               <Input type="number" value={newItemForm.sets} onChange={(e) => setNewItemForm((prev) => ({ ...prev, sets: e.target.value }))} placeholder="4" />
                             </div>
                             <div className="space-y-2">
                               <Label>Reps</Label>
-                              <Input value={newItemForm.reps} onChange={(e) => setNewItemForm((prev) => ({ ...prev, reps: e.target.value }))} placeholder="8-12" />
+                              <Input value={newItemForm.reps} onChange={(e) => setNewItemForm((prev) => ({ ...prev, reps: e.target.value }))} placeholder={isMobilityLikeExercise(selectedExercise) ? 'Opcional' : '8-12'} />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Tempo por série (seg)</Label>
+                              <Input type="number" value={newItemForm.duration_min} onChange={(e) => setNewItemForm((prev) => ({ ...prev, duration_min: e.target.value }))} placeholder={isMobilityLikeExercise(selectedExercise) ? '30' : 'Opcional'} />
                             </div>
                             <div className="space-y-2">
                               <Label>Carga alvo (kg)</Label>
@@ -2105,13 +2165,14 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                         {day.items.map((item) => {
                           const name = item.exercise_name || item.custom_exercise_name || 'Exercício'
                           const isCardio = item.block === 'cardio'
+                          const isTimeBasedItem = !isCardio && (item.duration_min ?? 0) > 0
                           return (
                             <div key={item.id} className="rounded-md border border-border bg-muted/20 p-3">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <Badge variant={isCardio ? 'secondary' : 'outline'}>
-                                      {isCardio ? 'Cardio' : 'Força'}
+                                      {isCardio ? 'Cardio' : isTimeBasedItem ? 'Mobilidade' : 'Força'}
                                     </Badge>
                                     <span className="font-medium text-white">{name}</span>
                                     {item.exercise_id ? (
@@ -2132,9 +2193,17 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                       </>
                                     ) : (
                                       <>
-                                        Séries: <strong>{item.sets ?? 0}</strong> • Reps: <strong>{item.reps ?? '-'}</strong>
-                                        {item.target_weight ? (
+                                        Séries: <strong>{item.sets ?? 0}</strong>
+                                        {isTimeBasedItem ? (
+                                          <> • Tempo: <strong>{item.duration_min ?? 0}s</strong></>
+                                        ) : (
+                                          <> • Reps: <strong>{item.reps ?? '-'}</strong></>
+                                        )}
+                                        {!isTimeBasedItem && item.target_weight ? (
                                           <> • Carga alvo: <strong>{item.target_weight} kg</strong></>
+                                        ) : null}
+                                        {isTimeBasedItem && item.reps ? (
+                                          <> • Reps: <strong>{item.reps}</strong></>
                                         ) : null}
                                       </>
                                     )}

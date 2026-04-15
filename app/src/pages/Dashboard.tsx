@@ -516,8 +516,8 @@ export function Dashboard({
     let overallStatus: ExecutiveSummary['overallStatus'] = 'Bom';
     let overallToneClass = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300';
     let focusToday = 'Treino normal, mantendo boa técnica e consistência.';
-    let positiveHighlight = positiveHighlights[0] || 'Base de acompanhamento montada.';
-    let mainAttention = priorityAlerts[0] || 'Sem alertas prioritários no momento.';
+    const positiveHighlight = positiveHighlights[0] || 'Base de acompanhamento montada.';
+    const mainAttention = priorityAlerts[0] || 'Sem alertas prioritários no momento.';
 
     if (
       (latestRecovery && latestRecovery.score < 60) ||

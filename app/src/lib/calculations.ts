@@ -64,7 +64,12 @@ export function calculateExerciseVolume(exercise: WorkoutExercise): number {
 
   return exercise.sets.reduce((total, set) => {
     const weight = Number(set.weight) || 0;
-    const reps = Number(set.reps) > 0 ? Number(set.reps) : DEFAULT_REPS_FALLBACK;
+    const hasTimeOnlySet = Number(set.durationSec) > 0 && !(Number(set.reps) > 0);
+    const reps = hasTimeOnlySet
+      ? 0
+      : Number(set.reps) > 0
+        ? Number(set.reps)
+        : DEFAULT_REPS_FALLBACK;
     return total + weight * reps;
   }, 0);
 }
@@ -290,21 +295,38 @@ export function calculateExerciseProgress(
   exerciseId?: string
 ): ExerciseProgress[] {
   const progressMap: Record<string, ExerciseProgress> = {};
+  const normalizeExerciseProgressKey = (value?: string | null) =>
+    String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+
+  const resolveExerciseProgressKey = (exercise: WorkoutSession['exercises'][number]) => {
+    if (exercise.exerciseId) return exercise.exerciseId;
+
+    const normalizedName = normalizeExerciseProgressKey(exercise.exerciseName);
+    if (normalizedName) return `custom:${normalizedName}`;
+
+    return '';
+  };
 
   workouts.forEach((workout) => {
     workout.exercises.forEach((ex) => {
       if (exerciseId && ex.exerciseId !== exerciseId) return;
+      const progressKey = resolveExerciseProgressKey(ex);
+      if (!progressKey) return;
 
-      if (!progressMap[ex.exerciseId]) {
-        progressMap[ex.exerciseId] = {
-          exerciseId: ex.exerciseId,
-          exerciseName: ex.exerciseName,
+      if (!progressMap[progressKey]) {
+        progressMap[progressKey] = {
+          exerciseId: progressKey,
+          exerciseName: ex.exerciseName || ex.exerciseId || 'Exercício',
           muscleGroup: ex.muscleGroup,
           history: [],
         };
       }
 
-      progressMap[ex.exerciseId].history.push({
+      progressMap[progressKey].history.push({
         date: workout.date,
         maxWeight: getMaxWeightForExercise(ex),
         totalVolume: calculateExerciseVolume(ex),

@@ -20,7 +20,7 @@ import { ExercisePicker, type ExercisePickerOption } from '@/components/exercise
 import { ExerciseHelpMenu } from '@/components/exercises/ExerciseHelpMenu'
 
 interface WorkoutFormProps {
-  onSave: (workout: WorkoutSession) => void
+  onSave: (workout: WorkoutSession) => void | Promise<void>
   selectedUserId?: string | null
   selectedUserLabel?: string | null
 }
@@ -152,12 +152,12 @@ function normalizeWeekDayLabel(value: string): WeekDay {
   return map[normalized] ?? 'Segunda'
 }
 
-function parseRepsToNumber(repsText: string | null): number {
-  if (!repsText) return 10
+function parseRepsToNumber(repsText: string | null, fallback = 10): number {
+  if (!repsText) return fallback
   const m = repsText.match(/\d+/)
-  if (!m) return 10
+  if (!m) return fallback
   const n = parseInt(m[0], 10)
-  return Number.isFinite(n) ? n : 10
+  return Number.isFinite(n) ? n : fallback
 }
 
 function normalizeMuscleGroup(value?: string | null): MuscleGroup {
@@ -233,7 +233,8 @@ function resolvePrefilledSets(
   setsCount: number,
   repsN: number,
   fallbackWeight: number,
-  previousSets?: WorkoutSet[]
+  previousSets?: WorkoutSet[],
+  durationSec?: number
 ): WorkoutSet[] {
   const safeFallbackWeight = Number.isFinite(fallbackWeight) ? fallbackWeight : 0
 
@@ -241,6 +242,7 @@ function resolvePrefilledSets(
     return Array.from({ length: setsCount }).map(() => ({
       reps: repsN,
       weight: safeFallbackWeight,
+      durationSec,
     }))
   }
 
@@ -248,6 +250,7 @@ function resolvePrefilledSets(
     return Array.from({ length: setsCount }).map((_, index) => ({
       reps: repsN,
       weight: Number(previousSets[index]?.weight ?? safeFallbackWeight) || 0,
+      durationSec: Number(previousSets[index]?.durationSec ?? durationSec) || undefined,
     }))
   }
 
@@ -260,11 +263,15 @@ function resolvePrefilledSets(
   return Array.from({ length: setsCount }).map(() => ({
     reps: repsN,
     weight: Number(lastKnownWeight) || 0,
+    durationSec,
   }))
 }
 
 function buildExerciseMeta(sets: WorkoutSet[]) {
   const setsCount = sets.length
+  const durationValues = sets
+    .map((set) => Number(set.durationSec || 0))
+    .filter((value) => Number.isFinite(value) && value > 0)
   const repsValues = sets
     .map((set) => Number(set.reps || 0))
     .filter((value) => Number.isFinite(value) && value > 0)
@@ -277,9 +284,49 @@ function buildExerciseMeta(sets: WorkoutSet[]) {
       ? minReps === maxReps
         ? `${minReps} reps`
         : `${minReps}-${maxReps} reps`
-      : 'Sem reps definidas'
+      : null
 
-  return `${setsCount} ${setsCount === 1 ? 'série' : 'séries'} • ${repsLabel}`
+  const minDuration = durationValues.length > 0 ? Math.min(...durationValues) : null
+  const maxDuration = durationValues.length > 0 ? Math.max(...durationValues) : null
+
+  const durationLabel =
+    minDuration && maxDuration
+      ? minDuration === maxDuration
+        ? `${minDuration}s por série`
+        : `${minDuration}-${maxDuration}s por série`
+      : null
+
+  return [
+    `${setsCount} ${setsCount === 1 ? 'série' : 'séries'}`,
+    durationLabel,
+    repsLabel,
+  ].filter(Boolean).join(' • ')
+}
+
+function isTimeBasedDbExercise(exercise?: DbExercise | null) {
+  if (!exercise) return false
+  const category = String(exercise.category ?? '').toLowerCase()
+  const muscle = String(exercise.muscle_group ?? '').toLowerCase()
+  const name = String(exercise.name ?? '').toLowerCase()
+
+  return (
+    category.includes('mobilidade') ||
+    category.includes('core') ||
+    muscle.includes('mobilidade') ||
+    muscle.includes('core') ||
+    name.includes('isometr') ||
+    name.includes('prancha')
+  )
+}
+
+function isTimeBasedWorkoutExercise(
+  exercise: WorkoutExercise,
+  dbExercisesById: Map<string, DbExercise>
+) {
+  if (exercise.sets.some((set) => Number(set.durationSec) > 0)) return true
+  if (exercise.muscleGroup === 'Mobilidade' || exercise.muscleGroup === 'Core') return true
+  if (exercise.exerciseId) return isTimeBasedDbExercise(dbExercisesById.get(exercise.exerciseId))
+  return /isometr|prancha/i.test(exercise.exerciseName || '')
 }
 
 function normalizeInjuryKey(value?: string | null) {
@@ -338,6 +385,7 @@ export function WorkoutForm({
 }: WorkoutFormProps) {
   const { user } = useAuth()
   const isStudentMode = !!selectedUserId
+  const isSaveBlockedInStudentMode = isStudentMode
   const targetUserId = selectedUserId ?? user?.id ?? null
 
   const [date, setDate] = useState(getTodayLocalDateString())
@@ -385,7 +433,8 @@ export function WorkoutForm({
     )
   }, [exercises])
 
-  const hasProgramSuggestions = !!activeProgramId && programExercises.length > 0
+  const hasActiveProgram = !!activeProgramId
+  const hasProgramSuggestions = hasActiveProgram && programExercises.length > 0
 
   const todaySplitGroups = (activeSplitDay?.muscle_groups ?? []).filter(Boolean)
 
@@ -395,7 +444,7 @@ export function WorkoutForm({
     (activeSplitDay.day_title ?? '').toLowerCase().includes('descanso')
 
   const canSuggestFromSplit =
-    !activeProgramId &&
+    !hasActiveProgram &&
     !!activeSplitDay &&
     !isSplitRestDay &&
     todaySplitGroups.length > 0 &&
@@ -415,8 +464,8 @@ export function WorkoutForm({
   }, [todaySplitGroups, injuryAlerts])
 
   const hasSplitConflicts = splitConflictGroups.length > 0
-  const shouldShowSplitPanel = !activeProgramId && !!activeSplit
-  const shouldShowProgramPanel = !!activeProgramId
+  const shouldShowSplitPanel = !hasActiveProgram && !!activeSplit
+  const shouldShowProgramPanel = hasActiveProgram
 
   useEffect(() => {
     const loadExercises = async () => {
@@ -496,13 +545,16 @@ export function WorkoutForm({
 
         if (activeErr) throw activeErr
 
-        const activeSplitId = active?.active_split_id ?? null
         const nextActiveProgramId = active?.active_program_id ?? null
+        const activeSplitId = active?.active_split_id ?? null
         setActiveProgramId(nextActiveProgramId)
 
         const weekdayNum = weekDayToNumber(weekDay)
 
-        if (activeSplitId) {
+        if (nextActiveProgramId) {
+          setActiveSplit(null)
+          setActiveSplitDay(null)
+        } else if (activeSplitId) {
           const [{ data: splitPlan, error: splitPlanErr }, { data: splitDay, error: splitDayErr }] =
             await Promise.all([
               supabase
@@ -573,16 +625,23 @@ export function WorkoutForm({
         const lastExerciseSetMap = buildLastExerciseSetMap(recentWorkoutRows)
 
         const planItems = (items ?? []) as unknown as DbPlanItem[]
-        const strengthItems = planItems.filter((it) => it.block === 'strength')
+        const workoutItems = planItems.filter((it) => it.block !== 'cardio')
 
-        const mapped: ProgramSuggestedExercise[] = strengthItems.map((it) => {
+        const mapped: ProgramSuggestedExercise[] = workoutItems.map((it) => {
           const exId = it.exercise_id ?? ''
           const exName = it.exercises?.name ?? it.custom_exercise_name ?? 'Exercício'
           const mg = normalizeMuscleGroup(it.muscle_group || dbExercisesById.get(exId)?.muscle_group || 'Peito')
+          const isTimeBasedItem =
+            mg === 'Mobilidade' ||
+            mg === 'Core' ||
+            isTimeBasedDbExercise(dbExercisesById.get(exId) ?? null) ||
+            Number(it.duration_min ?? 0) > 0
 
           const setsCount = Math.max(it.sets ?? 1, 1)
-          const repsN = parseRepsToNumber(it.reps)
+          const repsN = parseRepsToNumber(it.reps, isTimeBasedItem ? 0 : 10)
           const fallbackWeight = typeof it.target_weight === 'number' ? Number(it.target_weight) : 0
+          const durationSec =
+            isTimeBasedItem && Number(it.duration_min ?? 0) > 0 ? Number(it.duration_min) : undefined
 
           const lookupById = normalizeExerciseLookupKey(exId)
           const lookupByName = normalizeExerciseLookupKey(exName)
@@ -591,7 +650,7 @@ export function WorkoutForm({
             (lookupById ? lastExerciseSetMap.get(lookupById) : undefined) ??
             (lookupByName ? lastExerciseSetMap.get(lookupByName) : undefined)
 
-          const sets = resolvePrefilledSets(setsCount, repsN, fallbackWeight, previousSets)
+          const sets = resolvePrefilledSets(setsCount, repsN, fallbackWeight, previousSets, durationSec)
 
           return {
             planItemId: it.id,
@@ -643,9 +702,19 @@ export function WorkoutForm({
       prev.map((e) => {
         if (e.id === exerciseId) {
           const lastSet = e.sets[e.sets.length - 1]
+          const isTimeBased = isTimeBasedWorkoutExercise(e, dbExercisesById)
           return {
             ...e,
-            sets: [...e.sets, { reps: lastSet?.reps || 10, weight: lastSet?.weight || 0 }],
+            sets: [
+              ...e.sets,
+              {
+                reps: lastSet?.reps || (isTimeBased ? 0 : 10),
+                weight: isTimeBased ? 0 : lastSet?.weight || 0,
+                durationSec: isTimeBased
+                  ? Number(lastSet?.durationSec ?? 30) || 30
+                  : lastSet?.durationSec,
+              },
+            ],
           }
         }
         return e
@@ -684,11 +753,20 @@ export function WorkoutForm({
   const handleExerciseSelect = (exerciseId: string, workoutExerciseId: string) => {
     const ex = dbExercisesById.get(exerciseId)
     if (ex) {
+      const isTimeBased = isTimeBasedDbExercise(ex)
+      const current = exercises.find((exercise) => exercise.id === workoutExerciseId)
+      const nextSets = (current?.sets ?? [{ reps: 10, weight: 0 }]).map((set) => ({
+        reps: isTimeBased ? Number(set.reps || 0) : Number(set.reps || 10),
+        weight: isTimeBased ? 0 : Number(set.weight || 0),
+        durationSec: isTimeBased ? Number(set.durationSec ?? 30) || 30 : undefined,
+      }))
+
       updateExercise(workoutExerciseId, {
         sourceMode: 'bank',
         exerciseId: ex.id,
         exerciseName: ex.name,
         muscleGroup: normalizeMuscleGroup(ex.muscle_group),
+        sets: nextSets,
       })
     }
   }
@@ -734,13 +812,14 @@ export function WorkoutForm({
       const matchedExercise = dbExercises.find(
         (exercise) => exercise.type === 'strength' && exercise.muscle_group === group
       )
+      const isTimeBased = isTimeBasedDbExercise(matchedExercise)
 
       return {
         id: crypto.randomUUID(),
         exerciseId: matchedExercise?.id ?? '',
         exerciseName: matchedExercise?.name ?? '',
         muscleGroup: normalizeMuscleGroup(group),
-        sets: [{ reps: 10, weight: 0 }],
+        sets: [{ reps: isTimeBased ? 0 : 10, weight: 0, durationSec: isTimeBased ? 30 : undefined }],
         rpe: 7,
         notes: `Sugestão do split: ${group}`,
         sourceMode: matchedExercise?.id ? 'bank' : 'custom',
@@ -800,6 +879,12 @@ export function WorkoutForm({
 
   const handleSubmit = async () => {
     if (isSaving) return
+    if (isSaveBlockedInStudentMode) {
+      toast.error(
+        'Modo Aluno está em consulta no treino. O salvamento foi bloqueado para evitar registrar no histórico do coach/admin.'
+      )
+      return
+    }
 
     if (exercises.length === 0) {
       toast.error('Adicione pelo menos um exercício')
@@ -828,7 +913,7 @@ export function WorkoutForm({
       await Promise.resolve(onSave(workout))
 
       toast.success(
-        activeProgramId
+        hasActiveProgram
           ? 'Treino salvo! O histórico já pode ser usado no progresso do programa.'
           : 'Treino salvo com sucesso!'
       )
@@ -866,7 +951,7 @@ export function WorkoutForm({
       {isStudentMode && (
         <Card className="border-amber-500/30 bg-amber-500/10">
           <CardContent className="pt-6">
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Badge variant="secondary" className="bg-amber-500/20 text-amber-300">
                   Consulta do plano do aluno
@@ -875,6 +960,11 @@ export function WorkoutForm({
               <p className="text-sm text-amber-100">
                 Com o <strong>Modo Aluno</strong> ativo, esta tela passa a carregar automaticamente os
                 <strong> exercícios do programa ativo do aluno selecionado</strong> para consulta e registro.
+              </p>
+              <p className="text-sm text-amber-100">
+                Por segurança, o salvamento de treino fica <strong>temporariamente bloqueado</strong> enquanto
+                não houver um fluxo totalmente seguro para gravar diretamente no aluno selecionado.
+                Isso evita que o treino seja salvo por engano no histórico do coach/admin logado.
               </p>
             </div>
           </CardContent>
@@ -1178,6 +1268,7 @@ export function WorkoutForm({
 
         {exercises.map((exercise, exIndex) => {
           const sourceMode = inferSourceMode(exercise)
+          const isTimeBased = isTimeBasedWorkoutExercise(exercise, dbExercisesById)
 
           const conflicts = getConflictingInjuries({
             muscleGroup: exercise.muscleGroup,
@@ -1308,31 +1399,59 @@ export function WorkoutForm({
                 )}
 
                 <div className="space-y-2">
-                  <Label>Séries</Label>
+                  <Label>{isTimeBased ? 'Séries e tempo' : 'Séries'}</Label>
                   <div className="space-y-2">
                     {exercise.sets.map((set, setIndex) => (
                       <div key={setIndex} className="flex items-center gap-2">
                         <span className="w-12 text-sm text-muted-foreground">Série {setIndex + 1}</span>
-                        <Input
-                          type="number"
-                          placeholder="Reps"
-                          value={set.reps || ''}
-                          onChange={(e) =>
-                            updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
-                          }
-                          className="w-20 bg-background border-border"
-                        />
-                        <span className="text-muted-foreground">x</span>
-                        <Input
-                          type="number"
-                          placeholder="Kg"
-                          value={set.weight || ''}
-                          onChange={(e) =>
-                            updateSet(exercise.id, setIndex, { weight: parseFloat(e.target.value) || 0 })
-                          }
-                          className="w-24 bg-background border-border"
-                        />
-                        <span className="text-muted-foreground">kg</span>
+                        {isTimeBased ? (
+                          <>
+                            <Input
+                              type="number"
+                              placeholder="Tempo (seg)"
+                              value={set.durationSec || ''}
+                              onChange={(e) =>
+                                updateSet(exercise.id, setIndex, {
+                                  durationSec: parseInt(e.target.value) || undefined,
+                                })
+                              }
+                              className="w-28 bg-background border-border"
+                            />
+                            <span className="text-muted-foreground">seg</span>
+                            <Input
+                              type="number"
+                              placeholder="Reps (opc.)"
+                              value={set.reps || ''}
+                              onChange={(e) =>
+                                updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
+                              }
+                              className="w-28 bg-background border-border"
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <Input
+                              type="number"
+                              placeholder="Reps"
+                              value={set.reps || ''}
+                              onChange={(e) =>
+                                updateSet(exercise.id, setIndex, { reps: parseInt(e.target.value) || 0 })
+                              }
+                              className="w-20 bg-background border-border"
+                            />
+                            <span className="text-muted-foreground">x</span>
+                            <Input
+                              type="number"
+                              placeholder="Kg"
+                              value={set.weight || ''}
+                              onChange={(e) =>
+                                updateSet(exercise.id, setIndex, { weight: parseFloat(e.target.value) || 0 })
+                              }
+                              className="w-24 bg-background border-border"
+                            />
+                            <span className="text-muted-foreground">kg</span>
+                          </>
+                        )}
                         {exercise.sets.length > 1 && (
                           <Button
                             variant="ghost"
@@ -1413,9 +1532,18 @@ export function WorkoutForm({
 
       {exercises.length > 0 && (
         <div className="flex justify-end">
-          <Button onClick={handleSubmit} size="lg" className="gap-2" disabled={isSaving}>
+          <Button
+            onClick={handleSubmit}
+            size="lg"
+            className="gap-2"
+            disabled={isSaving || isSaveBlockedInStudentMode}
+          >
             <Save className="w-5 h-5" />
-            {isSaving ? 'Salvando...' : 'Salvar Treino'}
+            {isSaving
+              ? 'Salvando...'
+              : isSaveBlockedInStudentMode
+                ? 'Salvar bloqueado no Modo Aluno'
+                : 'Salvar Treino'}
           </Button>
         </div>
       )}
