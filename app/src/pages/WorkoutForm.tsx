@@ -1100,7 +1100,11 @@ export function WorkoutForm({
                 </div>
 
                 {hasProgramSuggestions && (
-                  <Button onClick={addAllProgramExercisesToRegister} variant="outline" className="gap-2">
+                  <Button
+                    onClick={addAllProgramExercisesToRegister}
+                    variant="outline"
+                    className="w-full gap-2 sm:w-auto"
+                  >
                     <Plus className="h-4 w-4" />
                     Adicionar todos
                   </Button>
@@ -1121,12 +1125,12 @@ export function WorkoutForm({
                     return (
                       <div
                         key={item.planItemId}
-                        className="rounded-lg border border-border/60 bg-background/40 px-4 py-3"
+                        className="rounded-xl border border-border/60 bg-background/40 px-4 py-4 sm:px-4 sm:py-3"
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-sm font-medium text-white">{item.exerciseName}</div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0 flex-1 space-y-2">
+                            <div className="flex flex-wrap items-start gap-2">
+                              <div className="min-w-0 text-base font-semibold leading-tight text-white sm:text-sm sm:font-medium">{item.exerciseName}</div>
 
                               {conflicts.length > 0 && (
                                 <Badge className="border border-amber-500/30 bg-amber-500/20 text-amber-300 text-[10px]">
@@ -1135,23 +1139,32 @@ export function WorkoutForm({
                               )}
                             </div>
 
-                            <div className="text-xs text-muted-foreground">{buildExerciseMeta(item.sets)}</div>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge className="rounded-full border border-primary/20 bg-primary/15 px-3 py-1 text-sm font-semibold text-primary sm:text-xs">
+                                {buildExerciseMeta(item.sets)}
+                              </Badge>
+                            </div>
 
                             {conflicts.length > 0 && (
-                              <div className="mt-1 text-xs text-amber-200">
+                              <div className="text-xs text-amber-200">
                                 Revise esse exercício antes de adicionar ao registro.
                               </div>
                             )}
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-2">
-                            <ExerciseHelpMenu exerciseName={item.exerciseName} />
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+                            <ExerciseHelpMenu
+                              exerciseName={item.exerciseName}
+                              className="w-full sm:w-auto"
+                              buttonClassName="w-full justify-center sm:w-auto"
+                            />
                             <Button
                               type="button"
                               size="sm"
                               variant={alreadyAdded ? 'secondary' : 'outline'}
                               disabled={alreadyAdded}
                               onClick={() => addProgramExerciseToRegister(item)}
+                              className="w-full sm:w-auto"
                             >
                               {alreadyAdded ? 'Já adicionado' : 'Adicionar treino'}
                             </Button>

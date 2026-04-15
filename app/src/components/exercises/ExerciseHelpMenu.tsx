@@ -10,6 +10,7 @@ type ExerciseHelpMenuProps = {
   aliases?: string[] | null
   className?: string
   buttonLabel?: string
+  buttonClassName?: string
 }
 
 export function ExerciseHelpMenu({
@@ -17,6 +18,7 @@ export function ExerciseHelpMenu({
   aliases,
   className = '',
   buttonLabel = 'Como fazer',
+  buttonClassName = '',
 }: ExerciseHelpMenuProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
@@ -51,7 +53,7 @@ export function ExerciseHelpMenu({
         type="button"
         size="sm"
         variant="outline"
-        className="gap-2"
+        className={`gap-2 ${buttonClassName}`}
         onClick={() => setOpen((prev) => !prev)}
       >
         <HelpCircle className="h-4 w-4" />
