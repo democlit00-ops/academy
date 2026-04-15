@@ -129,6 +129,10 @@ type EditorDay = DbPlanDay & {
   items: DbPlanItem[]
 }
 
+type ProgramDetailsState = {
+  days: EditorDay[]
+}
+
 type ExerciseRow = {
   id: string
   name: string
@@ -379,7 +383,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const [activeProgram, setActiveProgram] = useState<ProgramUI | null>(null)
   const [changingProgram, setChangingProgram] = useState<string | null>(null)
   const [deletingProgramId, setDeletingProgramId] = useState<string | null>(null)
-  const [details, setDetails] = useState<Record<string, { days: (DbPlanDay & { items: DbPlanItem[] })[] }>>({})
+  const [details, setDetails] = useState<Record<string, ProgramDetailsState>>({})
   const [activeProgramDays, setActiveProgramDays] = useState<DbPlanDay[]>([])
   const [activeProgramItems, setActiveProgramItems] = useState<Record<string, DbPlanItem[]>>({})
   const [completedTodayKeys, setCompletedTodayKeys] = useState<string[]>([])
@@ -670,6 +674,72 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     setActiveProgramItems(grouped)
   }, [])
 
+  const loadProgramDetails = useCallback(async (programId: string) => {
+    const { data: days, error: daysErr } = await supabase
+      .from('plan_days')
+      .select('id,plan_id,weekday,day_title')
+      .eq('plan_id', programId)
+      .order('weekday', { ascending: true })
+    if (daysErr) throw daysErr
+
+    const dayIds = (days ?? []).map((d: DbPlanDay) => d.id)
+    if (dayIds.length === 0) {
+      setDetails((prev) => ({ ...prev, [programId]: { days: [] } }))
+      return
+    }
+
+    const { data: items, error: itemsErr } = await supabase
+      .from('plan_items')
+      .select(`
+        id,plan_day_id,block,exercise_id,custom_exercise_name,muscle_group,sets,reps,target_weight,duration_min,zone_min_bpm,zone_max_bpm,notes,sort_order,
+        exercises:exercise_id ( name )
+      `)
+      .in('plan_day_id', dayIds)
+      .order('sort_order', { ascending: true })
+    if (itemsErr) throw itemsErr
+
+    const normalizedItems: DbPlanItem[] = (items ?? []).map((it: any) => ({
+      id: it.id,
+      plan_day_id: it.plan_day_id,
+      block: it.block,
+      exercise_id: it.exercise_id,
+      custom_exercise_name: it.custom_exercise_name,
+      muscle_group: it.muscle_group,
+      sets: it.sets,
+      reps: it.reps,
+      target_weight: it.target_weight,
+      duration_min: it.duration_min,
+      zone_min_bpm: it.zone_min_bpm,
+      zone_max_bpm: it.zone_max_bpm,
+      notes: it.notes,
+      sort_order: it.sort_order ?? 0,
+      exercise_name: it.exercises?.name ?? null,
+    }))
+
+    const byDay: Record<string, DbPlanItem[]> = {}
+    normalizedItems.forEach((item) => {
+      byDay[item.plan_day_id] = byDay[item.plan_day_id] ?? []
+      byDay[item.plan_day_id].push(item)
+    })
+
+    setDetails((prev) => ({
+      ...prev,
+      [programId]: { days: (days ?? []).map((d: DbPlanDay) => ({ ...d, items: byDay[d.id] ?? [] })) },
+    }))
+  }, [])
+
+  const refreshProgramDetails = useCallback(async (programId: string) => {
+    setDetails((prev) => {
+      if (!(programId in prev)) return prev
+      const next = { ...prev }
+      delete next[programId]
+      return next
+    })
+
+    if (expandedProgram !== programId) return
+    await loadProgramDetails(programId)
+  }, [expandedProgram, loadProgramDetails])
+
   const loadProgramContentForEditor = useCallback(async (programId: string) => {
     setContentLoading(true)
     try {
@@ -893,61 +963,11 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     if (!next || details[next]) return
 
     try {
-      const { data: days, error: daysErr } = await supabase
-        .from('plan_days')
-        .select('id,plan_id,weekday,day_title')
-        .eq('plan_id', programId)
-        .order('weekday', { ascending: true })
-      if (daysErr) throw daysErr
-
-      const dayIds = (days ?? []).map((d: DbPlanDay) => d.id)
-      if (dayIds.length === 0) {
-        setDetails((prev) => ({ ...prev, [programId]: { days: [] } }))
-        return
-      }
-
-      const { data: items, error: itemsErr } = await supabase
-        .from('plan_items')
-        .select(`
-          id,plan_day_id,block,exercise_id,custom_exercise_name,muscle_group,sets,reps,target_weight,duration_min,zone_min_bpm,zone_max_bpm,notes,sort_order,
-          exercises:exercise_id ( name )
-        `)
-        .in('plan_day_id', dayIds)
-        .order('sort_order', { ascending: true })
-      if (itemsErr) throw itemsErr
-
-      const normalizedItems: DbPlanItem[] = (items ?? []).map((it: any) => ({
-        id: it.id,
-        plan_day_id: it.plan_day_id,
-        block: it.block,
-        exercise_id: it.exercise_id,
-        custom_exercise_name: it.custom_exercise_name,
-        muscle_group: it.muscle_group,
-        sets: it.sets,
-        reps: it.reps,
-        target_weight: it.target_weight,
-        duration_min: it.duration_min,
-        zone_min_bpm: it.zone_min_bpm,
-        zone_max_bpm: it.zone_max_bpm,
-        notes: it.notes,
-        sort_order: it.sort_order ?? 0,
-        exercise_name: it.exercises?.name ?? null,
-      }))
-
-      const byDay: Record<string, DbPlanItem[]> = {}
-      normalizedItems.forEach((item) => {
-        byDay[item.plan_day_id] = byDay[item.plan_day_id] ?? []
-        byDay[item.plan_day_id].push(item)
-      })
-
-      setDetails((prev) => ({
-        ...prev,
-        [programId]: { days: (days ?? []).map((d: DbPlanDay) => ({ ...d, items: byDay[d.id] ?? [] })) },
-      }))
+      await loadProgramDetails(programId)
     } catch (e: any) {
       toast.error(e?.message ?? 'Erro ao carregar detalhes do programa.')
     }
-  }, [expandedProgram, details])
+  }, [expandedProgram, details, loadProgramDetails])
 
   const handleStartProgram = async (program: ProgramUI) => {
     if (!user || !targetUserId) return
@@ -1212,6 +1232,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       if (editingContentProgram?.id === editingProgramId) {
         await loadProgramContentForEditor(editingProgramId)
       }
+      await refreshProgramDetails(editingProgramId)
       if (activeProgramId === editingProgramId) {
         await loadActiveProgramContent(editingProgramId)
         await loadCompletedTodayProgress()
@@ -1281,6 +1302,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       setOpenNewItemDayId(null)
       setNewItemForm(emptyNewItemForm())
       await loadProgramContentForEditor(editingContentProgram.id)
+      await refreshProgramDetails(editingContentProgram.id)
       if (activeProgramId === editingContentProgram.id) {
         await loadActiveProgramContent(editingContentProgram.id)
         await loadCompletedTodayProgress()
@@ -1300,6 +1322,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       if (error) throw error
       toast.success('Item removido ✅')
       await loadProgramContentForEditor(editingContentProgram.id)
+      await refreshProgramDetails(editingContentProgram.id)
       if (activeProgramId === editingContentProgram.id) {
         await loadActiveProgramContent(editingContentProgram.id)
         await loadCompletedTodayProgress()
