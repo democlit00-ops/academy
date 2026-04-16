@@ -1,0 +1,355 @@
+{
+  "program_title": "Treino Teste Semanal AcademyK",
+  "days": [
+    {
+      "weekday": 1,
+      "day_name": "Segunda",
+      "items": [
+        {
+          "type": "strength",
+          "exercise_name": "Leg press",
+          "sets": 4,
+          "reps": "10-12",
+          "time_per_set_sec": null,
+          "target_weight": 120,
+          "notes": "Descer controlando, sem tirar o quadril do banco."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Cadeira extensora",
+          "sets": 3,
+          "reps": "12",
+          "time_per_set_sec": null,
+          "target_weight": 35,
+          "notes": "Segurar 1 segundo no topo."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Prancha",
+          "sets": 3,
+          "reps": null,
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Abdômen contraído e lombar neutra."
+        },
+        {
+          "type": "cardio",
+          "exercise_name": "Esteira",
+          "duration_min": 20,
+          "bpm_min": 120,
+          "bpm_max": 145,
+          "notes": "Ritmo moderado contínuo."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Alongamento de posterior",
+          "sets": 2,
+          "reps": null,
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Sem forçar a lombar, manter respiração calma."
+        }
+      ]
+    },
+    {
+      "weekday": 2,
+      "day_name": "Terça",
+      "items": [
+        {
+          "type": "strength",
+          "exercise_name": "Supino reto",
+          "sets": 4,
+          "reps": "8-10",
+          "time_per_set_sec": null,
+          "target_weight": 30,
+          "notes": "Pé firme no chão e controle na descida."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Remada baixa",
+          "sets": 3,
+          "reps": "10-12",
+          "time_per_set_sec": null,
+          "target_weight": 40,
+          "notes": "Fechar escápulas no final do movimento."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Dead bug",
+          "sets": 3,
+          "reps": "8",
+          "time_per_set_sec": 45,
+          "target_weight": null,
+          "notes": "Movimento lento, sem arquear a lombar."
+        },
+        {
+          "type": "cardio",
+          "exercise_name": "Bike",
+          "duration_min": 18,
+          "bpm_min": 115,
+          "bpm_max": 135,
+          "notes": "Cadência constante, leve a moderada."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Cat-cow",
+          "sets": 2,
+          "reps": null,
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Alternar flexão e extensão da coluna com controle."
+        }
+      ]
+    },
+    {
+      "weekday": 3,
+      "day_name": "Quarta",
+      "items": [
+        {
+          "type": "strength",
+          "exercise_name": "Mesa flexora",
+          "sets": 4,
+          "reps": "10",
+          "time_per_set_sec": null,
+          "target_weight": 30,
+          "notes": "Descer devagar e sem perder o alinhamento."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Panturrilha em pé",
+          "sets": 4,
+          "reps": "15",
+          "time_per_set_sec": null,
+          "target_weight": 20,
+          "notes": "Subir completo e descer completo."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Bird dog",
+          "sets": 3,
+          "reps": "8",
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Evitar girar o tronco."
+        },
+        {
+          "type": "cardio",
+          "exercise_name": "Caminhada rápida contínua",
+          "duration_min": 25,
+          "bpm_min": 118,
+          "bpm_max": 140,
+          "notes": "Manter passada firme e ritmo constante."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Alongamento de flexor do quadril",
+          "sets": 2,
+          "reps": null,
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Projetar levemente o quadril à frente sem compensar na lombar."
+        }
+      ]
+    },
+    {
+      "weekday": 4,
+      "day_name": "Quinta",
+      "items": [
+        {
+          "type": "strength",
+          "exercise_name": "Desenvolvimento com halteres",
+          "sets": 3,
+          "reps": "10",
+          "time_per_set_sec": null,
+          "target_weight": 12,
+          "notes": "Subir sem estender demais a lombar."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Rosca direta",
+          "sets": 3,
+          "reps": "12",
+          "time_per_set_sec": null,
+          "target_weight": 14,
+          "notes": "Sem balançar o corpo."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Prancha lateral",
+          "sets": 3,
+          "reps": null,
+          "time_per_set_sec": 20,
+          "target_weight": null,
+          "notes": "Manter quadril alinhado."
+        },
+        {
+          "type": "cardio",
+          "exercise_name": "Elíptico",
+          "duration_min": 15,
+          "bpm_min": 115,
+          "bpm_max": 135,
+          "notes": "Ritmo contínuo, sem pico alto."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Child's pose",
+          "sets": 2,
+          "reps": null,
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Relaxar ombros e alongar dorsal."
+        }
+      ]
+    },
+    {
+      "weekday": 5,
+      "day_name": "Sexta",
+      "items": [
+        {
+          "type": "strength",
+          "exercise_name": "Agachamento no smith",
+          "sets": 4,
+          "reps": "8-10",
+          "time_per_set_sec": null,
+          "target_weight": 40,
+          "notes": "Descer até amplitude confortável e subir empurrando o chão."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Stiff",
+          "sets": 3,
+          "reps": "10",
+          "time_per_set_sec": null,
+          "target_weight": 30,
+          "notes": "Quadril para trás, coluna neutra."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Bear plank",
+          "sets": 3,
+          "reps": null,
+          "time_per_set_sec": 20,
+          "target_weight": null,
+          "notes": "Joelhos levemente fora do chão, abdômen firme."
+        },
+        {
+          "type": "cardio",
+          "exercise_name": "Escada",
+          "duration_min": 12,
+          "bpm_min": 125,
+          "bpm_max": 150,
+          "notes": "Intensidade moderada, sem sprint."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Alongamento de glúteo/piriforme",
+          "sets": 2,
+          "reps": null,
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Manter sustentação confortável e sem forçar dor."
+        }
+      ]
+    },
+    {
+      "weekday": 6,
+      "day_name": "Sábado",
+      "items": [
+        {
+          "type": "strength",
+          "exercise_name": "Puxada frontal",
+          "sets": 4,
+          "reps": "10-12",
+          "time_per_set_sec": null,
+          "target_weight": 35,
+          "notes": "Puxar com costas, sem jogar o tronco."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Tríceps polia",
+          "sets": 3,
+          "reps": "12",
+          "time_per_set_sec": null,
+          "target_weight": 20,
+          "notes": "Cotovelo fixo ao lado do corpo."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Cat-cow",
+          "sets": 2,
+          "reps": null,
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Movimento lento acompanhando a respiração."
+        },
+        {
+          "type": "cardio",
+          "exercise_name": "Caminhada inclinada",
+          "duration_min": 20,
+          "bpm_min": 120,
+          "bpm_max": 142,
+          "notes": "Inclinação leve a moderada, sem correr."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Alongamento cervical lateral",
+          "sets": 2,
+          "reps": null,
+          "time_per_set_sec": 20,
+          "target_weight": null,
+          "notes": "Movimento suave, sem puxar demais."
+        }
+      ]
+    },
+    {
+      "weekday": 7,
+      "day_name": "Domingo",
+      "items": [
+        {
+          "type": "strength",
+          "exercise_name": "Abdominal máquina",
+          "sets": 3,
+          "reps": "15",
+          "time_per_set_sec": null,
+          "target_weight": 20,
+          "notes": "Subir controlando e não puxar com o pescoço."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Cadeira abdutora",
+          "sets": 3,
+          "reps": "15",
+          "time_per_set_sec": null,
+          "target_weight": 35,
+          "notes": "Segurar 1 segundo na contração."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Dead bug",
+          "sets": 2,
+          "reps": "10",
+          "time_per_set_sec": 40,
+          "target_weight": null,
+          "notes": "Controle total do tronco."
+        },
+        {
+          "type": "cardio",
+          "exercise_name": "Bike",
+          "duration_min": 22,
+          "bpm_min": 118,
+          "bpm_max": 138,
+          "notes": "Ritmo confortável contínuo."
+        },
+        {
+          "type": "strength",
+          "exercise_name": "Child's pose",
+          "sets": 2,
+          "reps": null,
+          "time_per_set_sec": 30,
+          "target_weight": null,
+          "notes": "Relaxamento final e mobilidade leve."
+        }
+      ]
+    }
+  ]
+}

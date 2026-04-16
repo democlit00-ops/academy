@@ -101,7 +101,6 @@ export function CardioForm({
   const [type, setType] = useState<CardioType>('Esteira')
   const [duration, setDuration] = useState('')
   const [distance, setDistance] = useState('')
-  const [avgSpeed, setAvgSpeed] = useState('')
   const [avgHeartRate, setAvgHeartRate] = useState('')
   const [maxHeartRate, setMaxHeartRate] = useState('')
   const [calories, setCalories] = useState('')
@@ -133,6 +132,18 @@ export function CardioForm({
     () => HEART_RATE_ZONES.find((z) => z.zone === computedHeartRateZone),
     [computedHeartRateZone]
   )
+
+  const avgSpeed = useMemo(() => {
+    const durationMinutes = safeNumber(duration)
+    const distanceKm = safeNumber(distance)
+
+    if (!durationMinutes || !distanceKm || durationMinutes <= 0 || distanceKm <= 0) {
+      return ''
+    }
+
+    const speed = distanceKm / (durationMinutes / 60)
+    return speed.toFixed(1)
+  }, [duration, distance])
 
   const hasProgramCardioSuggestions = programCardioItems.length > 0
 
@@ -290,7 +301,6 @@ export function CardioForm({
     setType('Esteira')
     setDuration('')
     setDistance('')
-    setAvgSpeed('')
     setAvgHeartRate('')
     setMaxHeartRate('')
     setCalories('')
@@ -552,12 +562,11 @@ const handleDeleteCardio = async (cardioId: string) => {
               <Label htmlFor="avgSpeed">Vel. Média (km/h)</Label>
               <Input
                 id="avgSpeed"
-                type="number"
-                step="0.1"
+                type="text"
                 placeholder="km/h"
                 value={avgSpeed}
-                onChange={(e) => setAvgSpeed(e.target.value)}
                 className="bg-background border-border"
+                readOnly
                 disabled={isStudentMode}
               />
             </div>
