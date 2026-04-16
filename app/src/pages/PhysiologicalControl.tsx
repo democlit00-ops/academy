@@ -38,6 +38,27 @@ function safeNumber(v: any): number | undefined {
   return Number.isFinite(n) ? n : undefined
 }
 
+function formatMinutesToTime(value?: number) {
+  if (!Number.isFinite(value) || value === undefined || value < 0) return ''
+  const totalMinutes = Math.round(value)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+function parseTimeToMinutes(value?: string) {
+  if (!value) return undefined
+  const [hoursText, minutesText] = value.split(':')
+  const hours = Number(hoursText)
+  const minutes = Number(minutesText)
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || minutes < 0 || minutes > 59) {
+    return undefined
+  }
+
+  return hours * 60 + minutes
+}
+
 export function PhysiologicalControl({
   onSave,
   physioData,
@@ -91,6 +112,10 @@ export function PhysiologicalControl({
 
       const mapped = ((data ?? []) as DbPhysioRow[]).map((row) => {
         const d = row.data ?? {}
+        const sleepRemMinutes = safeNumber(d.sleepREM)
+        const sleepLightMinutes = safeNumber(d.sleepLight)
+        const sleepDeepMinutes = safeNumber(d.sleepDeep)
+        const awakeTimeMinutes = safeNumber(d.awakeTime)
 
         const item: PhysiologicalData = {
           id: row.id,
@@ -101,10 +126,10 @@ export function PhysiologicalControl({
           sleepTotal: d.sleepTotal ?? '00:00',
           sleepTotalHours:
             safeNumber(d.sleepTotalHours) ?? parseTimeToDecimal(d.sleepTotal ?? '00:00'),
-          sleepREM: safeNumber(d.sleepREM),
-          sleepLight: safeNumber(d.sleepLight),
-          sleepDeep: safeNumber(d.sleepDeep),
-          awakeTime: safeNumber(d.awakeTime),
+          sleepREM: sleepRemMinutes,
+          sleepLight: sleepLightMinutes,
+          sleepDeep: sleepDeepMinutes,
+          awakeTime: awakeTimeMinutes,
           spo2: safeNumber(d.spo2),
           respiratoryRate: safeNumber(d.respiratoryRate),
           fatigue: safeNumber(d.fatigue) ?? 5,
@@ -194,10 +219,10 @@ const handleDeletePhysio = async (entryId: string) => {
       sleepHeartRate: sleepHR ? parseInt(sleepHR) : undefined,
       sleepTotal,
       sleepTotalHours,
-      sleepREM: sleepREM ? parseInt(sleepREM) : undefined,
-      sleepLight: sleepLight ? parseInt(sleepLight) : undefined,
-      sleepDeep: sleepDeep ? parseInt(sleepDeep) : undefined,
-      awakeTime: awakeTime ? parseInt(awakeTime) : undefined,
+      sleepREM: parseTimeToMinutes(sleepREM),
+      sleepLight: parseTimeToMinutes(sleepLight),
+      sleepDeep: parseTimeToMinutes(sleepDeep),
+      awakeTime: parseTimeToMinutes(awakeTime),
       spo2: spo2 ? parseInt(spo2) : undefined,
       respiratoryRate: respiratoryRate ? parseInt(respiratoryRate) : undefined,
       fatigue,
@@ -386,11 +411,10 @@ const handleDeletePhysio = async (entryId: string) => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="sleepREM">REM (min)</Label>
+                <Label htmlFor="sleepREM">REM (hh:mm)</Label>
                 <Input
                   id="sleepREM"
-                  type="number"
-                  placeholder="min"
+                  type="time"
                   value={sleepREM}
                   onChange={(e) => setSleepREM(e.target.value)}
                   className="bg-background border-border"
@@ -399,11 +423,10 @@ const handleDeletePhysio = async (entryId: string) => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="sleepLight">Leve (min)</Label>
+                <Label htmlFor="sleepLight">Leve (hh:mm)</Label>
                 <Input
                   id="sleepLight"
-                  type="number"
-                  placeholder="min"
+                  type="time"
                   value={sleepLight}
                   onChange={(e) => setSleepLight(e.target.value)}
                   className="bg-background border-border"
@@ -412,11 +435,10 @@ const handleDeletePhysio = async (entryId: string) => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="sleepDeep">Profundo (min)</Label>
+                <Label htmlFor="sleepDeep">Profundo (hh:mm)</Label>
                 <Input
                   id="sleepDeep"
-                  type="number"
-                  placeholder="min"
+                  type="time"
                   value={sleepDeep}
                   onChange={(e) => setSleepDeep(e.target.value)}
                   className="bg-background border-border"
@@ -425,11 +447,10 @@ const handleDeletePhysio = async (entryId: string) => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="awakeTime">Acordado (min)</Label>
+                <Label htmlFor="awakeTime">Acordado (hh:mm)</Label>
                 <Input
                   id="awakeTime"
-                  type="number"
-                  placeholder="min"
+                  type="time"
                   value={awakeTime}
                   onChange={(e) => setAwakeTime(e.target.value)}
                   className="bg-background border-border"
@@ -648,28 +669,28 @@ const handleDeletePhysio = async (entryId: string) => {
                     <div className="rounded-xl border border-border bg-background/40 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">REM</p>
                       <p className="mt-1 text-sm text-white">
-                        {h.sleepREM !== undefined ? `${h.sleepREM} min` : '-'}
+                        {h.sleepREM !== undefined ? formatMinutesToTime(h.sleepREM) : '-'}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-border bg-background/40 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Sono Leve</p>
                       <p className="mt-1 text-sm text-white">
-                        {h.sleepLight !== undefined ? `${h.sleepLight} min` : '-'}
+                        {h.sleepLight !== undefined ? formatMinutesToTime(h.sleepLight) : '-'}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-border bg-background/40 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Sono Profundo</p>
                       <p className="mt-1 text-sm text-white">
-                        {h.sleepDeep !== undefined ? `${h.sleepDeep} min` : '-'}
+                        {h.sleepDeep !== undefined ? formatMinutesToTime(h.sleepDeep) : '-'}
                       </p>
                     </div>
 
                     <div className="rounded-xl border border-border bg-background/40 p-4">
                       <p className="text-xs uppercase tracking-wide text-muted-foreground">Acordado</p>
                       <p className="mt-1 text-sm text-white">
-                        {h.awakeTime !== undefined ? `${h.awakeTime} min` : '-'}
+                        {h.awakeTime !== undefined ? formatMinutesToTime(h.awakeTime) : '-'}
                       </p>
                     </div>
 
