@@ -3,6 +3,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
+import {
+  buildAiWorkoutPrompt,
+  buildExerciseBankText,
+  WORKOUT_JSON_TEMPLATE,
+} from '@/lib/aiWorkoutJson'
 
 type ExerciseType = 'strength' | 'cardio'
 
@@ -88,6 +94,29 @@ export default function AdminExercises() {
       return hay.includes(s)
     })
   }, [items, search, showInactive])
+
+  const activeBankText = useMemo(() => {
+    return buildExerciseBankText(
+      items
+        .filter((item) => item.is_active)
+        .map((item) => ({
+          name: item.name,
+          muscle_group: item.muscle_group,
+          type: item.type,
+          equipment: item.equipment,
+          aliases: item.aliases ?? [],
+        }))
+    )
+  }, [items])
+
+  async function copyText(value: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success(successMessage)
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Não foi possível copiar.')
+    }
+  }
 
   async function load() {
     setLoading(true)
@@ -231,6 +260,59 @@ export default function AdminExercises() {
           />
           Mostrar inativos
         </label>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-white">Solicitar treino para IA</h3>
+            <p className="text-sm text-white/70">
+              Copie o prompt, a lista do banco e o modelo JSON para pedir um treino semanal já compatível com a importação em `Programas`.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => void copyText(buildAiWorkoutPrompt(), 'Prompt copiado.')}
+              className="px-3 py-2 rounded-lg border border-border bg-background text-white hover:bg-muted/40"
+            >
+              Copiar prompt
+            </button>
+            <button
+              onClick={() => void copyText(activeBankText, 'Banco de exercícios copiado.')}
+              className="px-3 py-2 rounded-lg border border-border bg-background text-white hover:bg-muted/40"
+            >
+              Copiar exercícios do banco
+            </button>
+            <button
+              onClick={() => void copyText(WORKOUT_JSON_TEMPLATE, 'Modelo JSON copiado.')}
+              className="px-3 py-2 rounded-lg border border-border bg-background text-white hover:bg-muted/40"
+            >
+              Copiar modelo JSON
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <div className="text-sm font-medium text-white">Prompt</div>
+            <p className="mt-1 text-xs text-white/60">
+              Explica o formato do JSON, campos aceitos, diferenças entre `strength` e `cardio`, além das regras para dias vazios e exercícios por tempo.
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <div className="text-sm font-medium text-white">Banco</div>
+            <p className="mt-1 text-xs text-white/60">
+              Lista os exercícios ativos com grupo, tipo, equipamento e aliases para ajudar a IA a responder com nomes mais compatíveis.
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <div className="text-sm font-medium text-white">Modelo JSON</div>
+            <p className="mt-1 text-xs text-white/60">
+              Entrega uma estrutura pronta de semana com `days`, `weekday` e `items` para colar direto no importador.
+            </p>
+          </div>
+        </div>
       </div>
 
       {errorMsg && (

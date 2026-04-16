@@ -19,6 +19,9 @@ import {
   Pencil,
   ListChecks,
   Trash2,
+  ArrowUp,
+  ArrowDown,
+  ClipboardCopy,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -42,6 +45,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { ExercisePicker, type ExercisePickerOption } from '@/components/exercises/ExercisePicker'
 import { ExerciseHelpMenu } from '@/components/exercises/ExerciseHelpMenu'
 import { getTodayLocalDateString } from '@/lib/date'
+import { WORKOUT_JSON_TEMPLATE } from '@/lib/aiWorkoutJson'
 
 type Role = 'admin' | 'coach' | 'user'
 type ProgramDifficulty = 'Iniciante' | 'Intermediário' | 'Avançado'
@@ -159,6 +163,37 @@ type NewItemForm = {
   notes: string
 }
 
+type ImportedStrengthItem = {
+  type: 'strength'
+  exercise_name: string
+  sets: number
+  reps?: string | number | null
+  time_per_set_sec?: number | null
+  target_weight?: number | null
+  notes?: string | null
+}
+
+type ImportedCardioItem = {
+  type: 'cardio'
+  exercise_name: string
+  duration_min: number
+  bpm_min?: number | null
+  bpm_max?: number | null
+  notes?: string | null
+}
+
+type ImportedProgramItem = ImportedStrengthItem | ImportedCardioItem
+
+type ImportedProgramDay = {
+  weekday: number
+  items: ImportedProgramItem[]
+}
+
+type ImportedProgramPayload = {
+  version?: number
+  days: ImportedProgramDay[]
+}
+
 
 
 type WorkoutSessionExerciseLite = {
@@ -213,6 +248,145 @@ const WEEKDAYS = [
 
 const weekdayLabel = (n: number) =>
   ({ 1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta', 5: 'Sexta', 6: 'Sábado', 7: 'Domingo' } as Record<number, string>)[n] ?? `Dia ${n}`
+
+const IMPORT_WEEKDAY_LOOKUP: Record<string, number> = {
+  '1': 1,
+  segunda: 1,
+  monday: 1,
+  mon: 1,
+  '2': 2,
+  terca: 2,
+  'terça': 2,
+  tuesday: 2,
+  tue: 2,
+  '3': 3,
+  quarta: 3,
+  wednesday: 3,
+  wed: 3,
+  '4': 4,
+  quinta: 4,
+  thursday: 4,
+  thu: 4,
+  '5': 5,
+  sexta: 5,
+  friday: 5,
+  fri: 5,
+  '6': 6,
+  sabado: 6,
+  'sábado': 6,
+  saturday: 6,
+  sat: 6,
+  '7': 7,
+  domingo: 7,
+  sunday: 7,
+  sun: 7,
+}
+
+function normalizeImportLookupKey(value?: string | null) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+function resolveImportedWeekday(value: unknown) {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 7) return value
+  const key = normalizeImportLookupKey(typeof value === 'string' ? value.replace('-feira', '') : String(value ?? ''))
+  return IMPORT_WEEKDAY_LOOKUP[key] ?? null
+}
+
+function toOptionalNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseImportedProgramPayload(raw: unknown): ImportedProgramPayload {
+  const buildDay = (sourceDay: unknown, fallbackWeekday?: unknown): ImportedProgramDay => {
+    const dayRecord = (sourceDay ?? {}) as Record<string, unknown>
+    const weekday = resolveImportedWeekday(dayRecord.weekday ?? dayRecord.day ?? dayRecord.label ?? fallbackWeekday)
+    if (!weekday) throw new Error('O JSON possui um dia da semana inválido.')
+
+    const rawItems = Array.isArray(dayRecord.items) ? dayRecord.items : Array.isArray(sourceDay) ? sourceDay : null
+    if (!rawItems) throw new Error(`O dia ${weekdayLabel(weekday)} precisa ter uma lista de itens.`)
+
+    const items = rawItems.map((entry, index) => {
+      const item = (entry ?? {}) as Record<string, unknown>
+      const type = String(item.type ?? '').trim().toLowerCase()
+      const exerciseName = String(item.exercise_name ?? '').trim()
+
+      if (!exerciseName) {
+        throw new Error(`O item ${index + 1} de ${weekdayLabel(weekday)} está sem exercise_name.`)
+      }
+
+      if (type === 'strength') {
+        const sets = toOptionalNumber(item.sets)
+        const repsValue = item.reps
+        const reps = repsValue === null || repsValue === undefined ? null : String(repsValue).trim()
+        const timePerSetSec = toOptionalNumber(item.time_per_set_sec)
+
+        if (!sets || sets <= 0) {
+          throw new Error(`O item "${exerciseName}" em ${weekdayLabel(weekday)} precisa ter sets válido.`)
+        }
+
+        if (!reps && !timePerSetSec) {
+          throw new Error(`O item "${exerciseName}" em ${weekdayLabel(weekday)} precisa ter reps ou time_per_set_sec.`)
+        }
+
+        return {
+          type: 'strength',
+          exercise_name: exerciseName,
+          sets,
+          reps,
+          time_per_set_sec: timePerSetSec,
+          target_weight: toOptionalNumber(item.target_weight),
+          notes: String(item.notes ?? '').trim() || null,
+        } satisfies ImportedStrengthItem
+      }
+
+      if (type === 'cardio') {
+        const durationMin = toOptionalNumber(item.duration_min)
+        if (!durationMin || durationMin <= 0) {
+          throw new Error(`O item "${exerciseName}" em ${weekdayLabel(weekday)} precisa ter duration_min válido.`)
+        }
+
+        return {
+          type: 'cardio',
+          exercise_name: exerciseName,
+          duration_min: durationMin,
+          bpm_min: toOptionalNumber(item.bpm_min),
+          bpm_max: toOptionalNumber(item.bpm_max),
+          notes: String(item.notes ?? '').trim() || null,
+        } satisfies ImportedCardioItem
+      }
+
+      throw new Error(`O item "${exerciseName}" em ${weekdayLabel(weekday)} possui type inválido.`)
+    })
+
+    return { weekday, items }
+  }
+
+  const payload = (raw ?? {}) as Record<string, unknown>
+  const daysSource = payload.days
+
+  if (Array.isArray(daysSource)) {
+    return {
+      version: toOptionalNumber(payload.version) ?? 1,
+      days: daysSource.map((day) => buildDay(day)),
+    }
+  }
+
+  const weekdayEntries = Object.entries(payload).filter(([key]) => resolveImportedWeekday(key))
+  if (weekdayEntries.length > 0) {
+    return {
+      version: toOptionalNumber(payload.version) ?? 1,
+      days: weekdayEntries.map(([key, value]) => buildDay(value, key)),
+    }
+  }
+
+  throw new Error('Formato inválido. Use { "days": [...] } ou um objeto com dias da semana.')
+}
 
 function getProfileDisplayName(
   profile?: { id?: string | null; full_name?: string | null; email?: string | null } | null,
@@ -410,6 +584,10 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
   const [newItemForm, setNewItemForm] = useState<NewItemForm>(emptyNewItemForm())
   const [savingNewItemDayId, setSavingNewItemDayId] = useState<string | null>(null)
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
+  const [movingItemId, setMovingItemId] = useState<string | null>(null)
+  const [importingContent, setImportingContent] = useState(false)
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
+  const [importJsonText, setImportJsonText] = useState(WORKOUT_JSON_TEMPLATE)
   const [exerciseOptions, setExerciseOptions] = useState<ExerciseRow[]>([])
 
   const canChangeActiveProgram = useMemo(() => {
@@ -438,6 +616,22 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       })),
     [exerciseOptions]
   )
+
+  const exerciseLookupByName = useMemo(() => {
+    const map = new Map<string, ExerciseRow>()
+
+    exerciseOptions.forEach((exercise) => {
+      const keys = [exercise.name, ...(exercise.aliases ?? [])]
+        .map((value) => normalizeImportLookupKey(value))
+        .filter(Boolean)
+
+      keys.forEach((key) => {
+        if (!map.has(key)) map.set(key, exercise)
+      })
+    })
+
+    return map
+  }, [exerciseOptions])
 
   const rawToday = new Date().toLocaleDateString('pt-BR', { weekday: 'long' })
   const normalizedToday = rawToday.replace('-feira', '').trim()
@@ -805,9 +999,30 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
     setEditingContentProgram(program)
     setOpenNewItemDayId(null)
     setNewItemForm(emptyNewItemForm())
+    setImportJsonText(WORKOUT_JSON_TEMPLATE)
+    setIsImportDialogOpen(false)
     setIsContentDialogOpen(true)
     await loadProgramContentForEditor(program.id)
   }
+
+  const refreshProgramContentViews = useCallback(async (programId: string) => {
+    await loadProgramContentForEditor(programId)
+    await refreshProgramDetails(programId)
+
+    if (activeProgramId === programId) {
+      await loadActiveProgramContent(programId)
+      await loadCompletedTodayProgress()
+    }
+  }, [activeProgramId, loadActiveProgramContent, loadCompletedTodayProgress, loadProgramContentForEditor, refreshProgramDetails])
+
+  const copyJsonTemplate = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(WORKOUT_JSON_TEMPLATE)
+      toast.success('Modelo JSON copiado.')
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Não foi possível copiar o modelo JSON.')
+    }
+  }, [])
 
   const reloadPrograms = useCallback(async () => {
     if (!user || !targetUserId) return
@@ -1331,6 +1546,134 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
       toast.error(e?.message ?? 'Erro ao remover item.')
     } finally {
       setDeletingItemId(null)
+    }
+  }
+
+  const handleMoveItem = async (dayId: string, itemId: string, direction: 'up' | 'down') => {
+    if (!editingContentProgram) return
+
+    const day = editorDays.find((entry) => entry.id === dayId)
+    if (!day) return
+
+    const currentIndex = day.items.findIndex((entry) => entry.id === itemId)
+    if (currentIndex === -1) return
+
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1
+    if (targetIndex < 0 || targetIndex >= day.items.length) return
+
+    const reordered = [...day.items]
+    const [movedItem] = reordered.splice(currentIndex, 1)
+    reordered.splice(targetIndex, 0, movedItem)
+
+    try {
+      setMovingItemId(itemId)
+
+      const updatePromises = reordered.map((entry, index) =>
+        supabase.from('plan_items').update({ sort_order: index }).eq('id', entry.id)
+      )
+
+      const results = await Promise.all(updatePromises)
+      const failed = results.find((result) => result.error)
+      if (failed?.error) throw failed.error
+
+      await refreshProgramContentViews(editingContentProgram.id)
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao reordenar item.')
+    } finally {
+      setMovingItemId(null)
+    }
+  }
+
+  const handleImportProgramJson = async () => {
+    if (!editingContentProgram) return
+
+    try {
+      setImportingContent(true)
+
+      const rawText = importJsonText.trim()
+      if (!rawText) throw new Error('Cole um JSON antes de importar.')
+
+      const parsed = parseImportedProgramPayload(JSON.parse(rawText))
+      const dayMap = new Map(editorDays.map((day) => [day.weekday, day]))
+      const insertPayload: Array<Record<string, unknown>> = []
+      const missingDays: string[] = []
+      let linkedExerciseCount = 0
+      let customExerciseCount = 0
+
+      parsed.days.forEach((day) => {
+        const targetDay = dayMap.get(day.weekday)
+        if (!targetDay) {
+          missingDays.push(weekdayLabel(day.weekday))
+          return
+        }
+
+        const baseSortOrder =
+          targetDay.items.length > 0
+            ? Math.max(...targetDay.items.map((item) => Number(item.sort_order ?? 0))) + 1
+            : 0
+
+        day.items.forEach((item, index) => {
+          const matchedExercise = exerciseLookupByName.get(normalizeImportLookupKey(item.exercise_name))
+          if (matchedExercise) linkedExerciseCount += 1
+          else customExerciseCount += 1
+
+          if (item.type === 'strength') {
+            insertPayload.push({
+              plan_day_id: targetDay.id,
+              block: 'strength',
+              exercise_id: matchedExercise?.id ?? null,
+              custom_exercise_name: matchedExercise ? null : item.exercise_name,
+              muscle_group: matchedExercise?.muscle_group ?? null,
+              sets: item.sets,
+              reps: item.reps ? String(item.reps).trim() : null,
+              target_weight: item.target_weight ?? null,
+              duration_min: item.time_per_set_sec ?? null,
+              zone_min_bpm: null,
+              zone_max_bpm: null,
+              notes: item.notes ?? null,
+              sort_order: baseSortOrder + index,
+            })
+            return
+          }
+
+          insertPayload.push({
+            plan_day_id: targetDay.id,
+            block: 'cardio',
+            exercise_id: matchedExercise?.id ?? null,
+            custom_exercise_name: matchedExercise ? null : item.exercise_name,
+            muscle_group: matchedExercise?.muscle_group ?? 'Cardio',
+            sets: null,
+            reps: null,
+            target_weight: null,
+            duration_min: item.duration_min,
+            zone_min_bpm: item.bpm_min ?? null,
+            zone_max_bpm: item.bpm_max ?? null,
+            notes: item.notes ?? null,
+            sort_order: baseSortOrder + index,
+          })
+        })
+      })
+
+      if (insertPayload.length === 0) {
+        throw new Error('Nenhum item válido encontrado para importar nos dias deste programa.')
+      }
+
+      const { error } = await supabase.from('plan_items').insert(insertPayload)
+      if (error) throw error
+
+      await refreshProgramContentViews(editingContentProgram.id)
+
+      const importedCount = insertPayload.length
+      const missingDaysLabel = missingDays.length > 0 ? ` Dias ignorados: ${missingDays.join(', ')}.` : ''
+
+      toast.success(
+        `${importedCount} item(ns) importado(s). ${linkedExerciseCount} ligado(s) ao banco e ${customExerciseCount} customizado(s).${missingDaysLabel}`
+      )
+      setIsImportDialogOpen(false)
+    } catch (e: any) {
+      toast.error(e?.message ?? 'Erro ao importar treino do JSON.')
+    } finally {
+      setImportingContent(false)
     }
   }
 
@@ -2123,9 +2466,40 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
           <DialogHeader>
             <DialogTitle>Editor de conteúdo{editingContentProgram ? ` • ${editingContentProgram.name}` : ''}</DialogTitle>
             <DialogDescription>
-              Agora você pode usar exercícios do banco ou cadastrar item personalizado por dia.
+              Agora você pode usar exercícios do banco, cadastrar item personalizado por dia ou importar a semana em JSON.
             </DialogDescription>
           </DialogHeader>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+            <div className="space-y-1">
+              <div className="text-sm font-medium text-white">Importação semanal JSON</div>
+              <div className="text-xs text-muted-foreground">
+                Formato pensado para futura exportação: <code className="rounded bg-background px-1.5 py-0.5">{"{ \"version\": 1, \"days\": [...] }"}</code>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2"
+                onClick={() => setIsImportDialogOpen(true)}
+                disabled={importingContent || !editingContentProgram}
+              >
+                <ClipboardCopy className="h-4 w-4" />
+                {importingContent ? 'Importando...' : 'Importar treino'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2"
+                onClick={() => void copyJsonTemplate()}
+              >
+                <ClipboardCopy className="h-4 w-4" />
+                Copiar modelo JSON
+              </Button>
+            </div>
+          </div>
 
           <div className="max-h-[70vh] overflow-y-auto pr-1">
             {contentLoading ? (
@@ -2254,7 +2628,7 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                       <div className="text-sm text-muted-foreground">Nenhum item cadastrado neste dia.</div>
                     ) : (
                       <div className="space-y-2">
-                        {day.items.map((item) => {
+                        {day.items.map((item, index) => {
                           const name = item.exercise_name || item.custom_exercise_name || 'Exercício'
                           const isCardio = item.block === 'cardio'
                           const isTimeBasedItem = !isCardio && (item.duration_min ?? 0) > 0
@@ -2308,16 +2682,41 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
                                   ) : null}
                                 </div>
 
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="gap-2"
-                                  onClick={() => void handleDeleteItem(item.id)}
-                                  disabled={deletingItemId === item.id}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                  {deletingItemId === item.id ? 'Removendo...' : 'Remover'}
-                                </Button>
+                                <div className="flex flex-col gap-2">
+                                  <div className="flex gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() => void handleMoveItem(day.id, item.id, 'up')}
+                                      disabled={movingItemId === item.id || index === 0}
+                                      title="Subir item"
+                                    >
+                                      <ArrowUp className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8"
+                                      onClick={() => void handleMoveItem(day.id, item.id, 'down')}
+                                      disabled={movingItemId === item.id || index === day.items.length - 1}
+                                      title="Descer item"
+                                    >
+                                      <ArrowDown className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-2"
+                                    onClick={() => void handleDeleteItem(item.id)}
+                                    disabled={deletingItemId === item.id}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    {deletingItemId === item.id ? 'Removendo...' : 'Remover'}
+                                  </Button>
+                                </div>
                               </div>
                             </div>
                           )
@@ -2332,6 +2731,49 @@ export function WorkoutPrograms({ selectedUserId, selectedUserLabel }: WorkoutPr
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsContentDialogOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Importar treino por JSON</DialogTitle>
+            <DialogDescription>
+              Cole o JSON do treino semanal com Ctrl+C / Ctrl+V. O sistema tenta localizar o exercício no banco e, se não encontrar, salva como personalizado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-4 py-3">
+              <div className="text-sm text-muted-foreground">
+                Aceita `strength` e `cardio`. Exercícios por tempo, mobilidade e isometria entram como `strength`.
+              </div>
+              <Button type="button" variant="outline" className="gap-2" onClick={() => void copyJsonTemplate()}>
+                <ClipboardCopy className="h-4 w-4" />
+                Copiar modelo JSON
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="program-import-json">Código JSON</Label>
+              <Textarea
+                id="program-import-json"
+                value={importJsonText}
+                onChange={(e) => setImportJsonText(e.target.value)}
+                className="min-h-[360px] font-mono text-sm"
+                placeholder={WORKOUT_JSON_TEMPLATE}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsImportDialogOpen(false)} disabled={importingContent}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void handleImportProgramJson()} disabled={importingContent}>
+              {importingContent ? 'Importando...' : 'Importar treino'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
